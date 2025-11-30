@@ -6,6 +6,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import router
+from app.security import apply_basic_auth
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
@@ -14,6 +15,7 @@ INDEX_FILE = STATIC_DIR / "index.html"
 
 def create_app() -> FastAPI:
     app = FastAPI(title="CleanSync API", version="0.1.0")
+    apply_basic_auth(app)
 
     app.add_middleware(
         CORSMiddleware,

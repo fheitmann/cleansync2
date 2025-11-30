@@ -411,3 +411,19 @@ This repo includes a `render.yaml` blueprint that provisions a Render web servic
    After the first deploy succeeds, open the service’s *Settings ➜ Custom Domains* page in Render, add `cleansync.ai`, and follow the DNS instructions (Render generates the required CNAME/ALIAS records). Once DNS propagates, Render will automatically provision TLS certificates so the FastAPI frontend/API are served from your domain.
 
 > **Note on Python version:** The repo includes a `.python-version` file pinned to `3.12.3`. Render respects this during deployment to avoid falling back to Python 3.13 (which lacks pre-built wheels for `pydantic-core` and causes Rust/maturin build failures). Keep the file in sync if you upgrade dependencies that require a newer interpreter.
+
+---
+
+## 7. Authentication
+
+All HTTP routes (including static assets) are protected with Basic Auth. The default credentials are:
+
+* Username: `describe`
+* Password: `it`
+
+Override them via environment variables if needed:
+
+* `BASIC_AUTH_USERNAME`
+* `BASIC_AUTH_PASSWORD`
+
+Leaving both variables empty disables the auth middleware (not recommended for production).
