@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from typing import Dict, Optional
 
 from app.db.database import get_connection, init_db
@@ -8,6 +9,7 @@ from app.db.database import get_connection, init_db
 init_db()
 
 PROMPT_SETTING_NAME = "system_prompt"
+GEMINI_CONFIG_NAME = "gemini_config"
 
 def _row_to_dict(row) -> dict:
     return {
@@ -142,3 +144,20 @@ def delete_setting(name: str) -> None:
 
 def reset_system_prompt() -> None:
     delete_setting(PROMPT_SETTING_NAME)
+
+
+def get_gemini_config() -> dict:
+    record = get_setting(GEMINI_CONFIG_NAME)
+    if not record or not record.get("value"):
+        return {}
+    try:
+        return json.loads(record["value"])
+    except json.JSONDecodeError:
+        return {}
+
+
+def set_gemini_config(config: dict) -> dict:
+    if config is None:
+        config = {}
+    value = json.dumps(config, ensure_ascii=True)
+    return set_setting(GEMINI_CONFIG_NAME, value)

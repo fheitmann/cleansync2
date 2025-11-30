@@ -135,6 +135,22 @@ class SystemPromptUpdateRequest(BaseModel):
     use_default: bool = False
 
 
+class GeminiConfig(BaseModel):
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    media_resolution: Optional[str] = None
+
+
+class GeminiConfigResponse(BaseModel):
+    config: GeminiConfig
+
+
+class GeminiConfigUpdateRequest(BaseModel):
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    media_resolution: Optional[str] = None
+
+
 class StoredPlanSummary(BaseModel):
     id: str
     source: str

@@ -18,6 +18,9 @@ from app.models.schemas import (
     BatchRunRequest,
     BatchStatusResponse,
     ConvertPlanResponse,
+    GeminiConfig,
+    GeminiConfigResponse,
+    GeminiConfigUpdateRequest,
     FloorPlanOptions,
     GeneratePlanRequest,
     GeneratePlanResponse,
@@ -225,6 +228,25 @@ async def update_system_prompt(request: SystemPromptUpdateRequest) -> SystemProm
         raise HTTPException(status_code=400, detail="prompt is required")
     record = config_store.set_system_prompt(request.prompt)
     return _prompt_response(record)
+
+
+@router.get("/admin/gemini-config", response_model=GeminiConfigResponse)
+async def get_gemini_config_route() -> GeminiConfigResponse:
+    raw = config_store.get_gemini_config()
+    config = GeminiConfig(**raw)
+    return GeminiConfigResponse(config=config)
+
+
+@router.post("/admin/gemini-config", response_model=GeminiConfigResponse)
+async def update_gemini_config_route(request: GeminiConfigUpdateRequest) -> GeminiConfigResponse:
+    new_config: dict = {}
+    data = request.model_dump()
+    for key, value in data.items():
+        if value is not None:
+            new_config[key] = value
+    stored = config_store.set_gemini_config(new_config)
+    config = GeminiConfig(**config_store.get_gemini_config())
+    return GeminiConfigResponse(config=config)
 
 
 def _parse_datetime(value: str) -> datetime:

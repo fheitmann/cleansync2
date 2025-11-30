@@ -103,6 +103,26 @@ class GeminiClient:
                 top_p=0.9,
             )
             config_data = base_config.model_dump()
+            overrides = config_store.get_gemini_config()
+            if overrides.get("temperature") is not None:
+                config_data["temperature"] = overrides["temperature"]
+            if overrides.get("top_p") is not None:
+                config_data["top_p"] = overrides["top_p"]
+            media_level = overrides.get("media_resolution")
+            if media_level:
+                level = str(media_level).strip().lower()
+                media_map = {
+                    "low": getattr(types.MediaResolution, "MEDIA_RESOLUTION_LOW", None),
+                    "medium": getattr(
+                        types.MediaResolution, "MEDIA_RESOLUTION_MEDIUM", None
+                    ),
+                    "high": getattr(
+                        types.MediaResolution, "MEDIA_RESOLUTION_HIGH", None
+                    ),
+                }
+                media_enum = media_map.get(level)
+                if media_enum is not None:
+                    config_data["media_resolution"] = media_enum
             if response_mime_type:
                 config_data["response_mime_type"] = response_mime_type
             if response_json_schema:
