@@ -1,0 +1,21 @@
+{
+  "name": "cleansync2",
+  "version": "1.0.0",
+  "description": "This application is a lightweight web tool that turns **floor plans (PDF or image)** into **cleaning plans (DOCX)** using Google’s **Gemini 3 Pro** model.",
+  "main": "index.js",
+  "scripts": {
+    "build": "esbuild frontend.jsx --bundle --outfile=static/app.js --loader:.jsx=jsx --format=esm --sourcemap --target=es2018",
+    "dev": "npm run build -- --watch"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "lucide-react": "^0.555.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.0"
+  }
+}
