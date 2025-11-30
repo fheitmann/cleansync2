@@ -376,3 +376,36 @@ The FastAPI app will wrap these calls using Google’s Gemini REST API / Python 
       * List batch jobs, status, success ratios.
       * Download sample results (DOCX + JSON).
       * Filter by “suspicious” plans (e.g., very few or very many rooms, missing m²).
+
+---
+
+## 6. Deployment (Render.com)
+
+This repo includes a `render.yaml` blueprint that provisions a Render web service for the FastAPI backend and React frontend.
+
+1. **Commit & push**  
+   Ensure your latest changes (including `render.yaml`) are pushed to the GitHub/GitLab repo that Render can access.
+
+2. **Create a Blueprint**  
+   In Render’s dashboard choose *New ➜ Blueprint*, connect the repository, and select the branch with `render.yaml`. Render will detect the `cleansync-api` web service definition.
+
+3. **Configure service settings**  
+   * Keep the default region/plan or adjust to your needs.  
+   * `buildCommand` installs Python deps and builds the static frontend (`pip install -r requirements.txt && npm install && npm run build`).  
+   * `startCommand` runs `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+
+4. **Secrets & env vars**  
+   * Add `GEMINI_API_KEY` in the Render dashboard (the blueprint marks it as `sync: false`, so it must be entered manually each time).  
+   * Optionally override `PYTHON_VERSION` (defaults to `3.12` from the blueprint) or add more variables as needed.
+
+5. **Persistent storage**  
+   The blueprint mounts a Render Disk named `cleansync-storage` at `/opt/render/project/src/storage`, which FastAPI already uses for uploads, generated DOCX files, and SQLite. Adjust the disk size if you expect larger artifacts.
+
+6. **Deploy & verify**  
+   Click *Deploy* to kick off the first build. Once live, hit `/health` (e.g., `https://<service>.onrender.com/health`) to confirm FastAPI is running. Frontend assets are served from the `static/` directory that was built during the Render build step.
+
+7. **Next deployments**  
+   Push to the tracked branch to trigger automatic deploys (because `autoDeploy: true`). Use Render logs to inspect build/runtime output if something fails.
+
+8. **Custom domain (`cleansync.ai`)**  
+   After the first deploy succeeds, open the service’s *Settings ➜ Custom Domains* page in Render, add `cleansync.ai`, and follow the DNS instructions (Render generates the required CNAME/ALIAS records). Once DNS propagates, Render will automatically provision TLS certificates so the FastAPI frontend/API are served from your domain.

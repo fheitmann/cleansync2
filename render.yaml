@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: cleansync-api
+    env: python
+    plan: starter
+    region: oregon
+    buildCommand: |
+      pip install -r requirements.txt
+      npm install
+      npm run build
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true
+    disk:
+      name: cleansync-storage
+      mountPath: /opt/render/project/src/storage
+      sizeGB: 5
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.12
