@@ -26,12 +26,6 @@ try:
 except AttributeError:  # pragma: no cover - fallback if enum missing
     MODALITY_TEXT = "TEXT"
 
-try:
-    THINKING_HIGH = types.ThinkingLevel.HIGH
-except AttributeError:  # pragma: no cover
-    THINKING_HIGH = "THINKING_LEVEL_HIGH"
-
-
 def _extract_json_blob(text: str) -> str:
     snippet = text.strip()
     if "```" in snippet:
@@ -94,24 +88,30 @@ class GeminiClient:
             self._cached_key = key
         return self._client
 
-    async def _call_model(self, parts: List[types.Part]) -> str:
+    async def _call_model(
+        self,
+        parts: List[types.Part],
+        *,
+        response_mime_type: Optional[str] = None,
+        response_json_schema: Optional[Dict[str, Any]] = None,
+    ) -> str:
         def _run() -> str:
             client = self._get_client()
-            config_kwargs = {
-                "response_modalities": [MODALITY_TEXT],
-                "temperature": 0.3,
-                "top_p": 0.9,
-            }
-            if hasattr(types.GenerateContentConfig, "model_fields"):
-                fields = types.GenerateContentConfig.model_fields
-            else:
-                fields = getattr(types.GenerateContentConfig, "__fields__", {})
-            if "thinking_level" in fields:
-                config_kwargs["thinking_level"] = THINKING_HIGH
+            base_config = types.GenerateContentConfig(
+                response_modalities=[MODALITY_TEXT],
+                temperature=0.3,
+                top_p=0.9,
+            )
+            config_data = base_config.model_dump()
+            if response_mime_type:
+                config_data["response_mime_type"] = response_mime_type
+            if response_json_schema:
+                config_data["response_json_schema"] = response_json_schema
+            config = types.GenerateContentConfig(**config_data)
             response = client.models.generate_content(
                 model=self.model_name,
                 contents=parts,
-                config=types.GenerateContentConfig(**config_kwargs),
+                config=config,
             )
             return getattr(response, "text", None) or getattr(
                 response, "output_text", ""
@@ -190,33 +190,13 @@ class GeminiClient:
             types.Part.from_text(content),
             types.Part.from_text(instruction),
         ]
-        raw_response = await self._call_model(parts)
-        data = _load_json(raw_response)
-        entries_data = data.get("entries") or []
-        entries: List[CleaningPlanEntry] = []
-        for entry in entries_data:
-            if not isinstance(entry, dict):
-                continue
-            frequency = entry.get("frequency") or {}
-            entries.append(
-                CleaningPlanEntry(
-                    room_name=entry.get("room_name") or entry.get("name") or "Rom",
-                    area_m2=entry.get("area_m2"),
-                    floor=entry.get("floor"),
-                    description=entry.get("description") or "",
-                    frequency={day: bool(frequency.get(day)) for day in frequency},
-                    notes=entry.get("notes"),
-                )
-            )
-        total_area = data.get("total_area_m2") or sum(
-            entry.area_m2 or 0 for entry in entries
+        raw_response = await self._call_model(
+            parts,
+            response_mime_type="application/json",
+            response_json_schema=CleaningPlan.model_json_schema(),
         )
-        final_template = data.get("template_name") or template_label
-        return CleaningPlan(
-            entries=entries,
-            total_area_m2=total_area,
-            template_name=final_template,
-        )
+        plan = CleaningPlan.model_validate_json(raw_response)
+        return plan
 
     async def convert_to_cleansync(self, raw_text: str) -> CleaningPlan:
         base_prompt = self._get_prompt_text()
@@ -229,26 +209,10 @@ class GeminiClient:
             types.Part.from_text(raw_text),
             types.Part.from_text(instruction),
         ]
-        raw_response = await self._call_model(parts)
-        data = _load_json(raw_response)
-        entries_data = data.get("entries") or []
-        entries: List[CleaningPlanEntry] = []
-        for entry in entries_data:
-            if not isinstance(entry, dict):
-                continue
-            frequency = entry.get("frequency") or {}
-            entries.append(
-                CleaningPlanEntry(
-                    room_name=entry.get("room_name") or entry.get("name") or "Rom",
-                    area_m2=entry.get("area_m2"),
-                    floor=entry.get("floor"),
-                    description=entry.get("description") or "",
-                    frequency={day: bool(frequency.get(day)) for day in frequency},
-                    notes=entry.get("notes"),
-                )
-            )
-        total_area = data.get("total_area_m2") or sum(
-            entry.area_m2 or 0 for entry in entries
+        raw_response = await self._call_model(
+            parts,
+            response_mime_type="application/json",
+            response_json_schema=CleaningPlan.model_json_schema(),
         )
-        template_label = data.get("template_name") or "Cleansync Standard"
-        return CleaningPlan(entries=entries, total_area_m2=total_area, template_name=template_label)
+        plan = CleaningPlan.model_validate_json(raw_response)
+        return plan
