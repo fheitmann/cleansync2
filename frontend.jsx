@@ -1039,6 +1039,9 @@ const AdminDashboard = () => {
   const [promptMeta, setPromptMeta] = useState({ updated_at: null, is_overridden: false });
   const [isPromptLoading, setIsPromptLoading] = useState(true);
   const [isPromptSaving, setIsPromptSaving] = useState(false);
+  const [geminiConfig, setGeminiConfig] = useState({ temperature: '', top_p: '', media_resolution: '' });
+  const [isGeminiConfigLoading, setIsGeminiConfigLoading] = useState(true);
+  const [isGeminiConfigSaving, setIsGeminiConfigSaving] = useState(false);
 
   const fetchKeys = useCallback(async () => {
     setLoading(true);
@@ -1074,10 +1077,32 @@ const AdminDashboard = () => {
     }
   }, []);
 
+  const loadGeminiConfig = useCallback(async () => {
+    setIsGeminiConfigLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/admin/gemini-config`);
+      if (!response.ok) {
+        throw new Error('Kunne ikke hente Gemini-konfigurasjon');
+      }
+      const data = await response.json();
+      const cfg = data.config || {};
+      setGeminiConfig({
+        temperature: cfg.temperature ?? '',
+        top_p: cfg.top_p ?? '',
+        media_resolution: cfg.media_resolution || ''
+      });
+    } catch (err) {
+      setError(err.message || 'Ukjent feil ved henting av Gemini-konfigurasjon');
+    } finally {
+      setIsGeminiConfigLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     fetchKeys();
     loadPrompt();
-  }, [fetchKeys, loadPrompt]);
+    loadGeminiConfig();
+  }, [fetchKeys, loadPrompt, loadGeminiConfig]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -1182,6 +1207,39 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleGeminiConfigSave = async () => {
+    setError('');
+    setMessage('');
+    try {
+      setIsGeminiConfigSaving(true);
+      const payload = {
+        temperature: geminiConfig.temperature === '' ? null : Number(geminiConfig.temperature),
+        top_p: geminiConfig.top_p === '' ? null : Number(geminiConfig.top_p),
+        media_resolution: geminiConfig.media_resolution || null
+      };
+      const response = await fetch(`${API_BASE}/admin/gemini-config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        throw new Error('Kunne ikke lagre Gemini-konfigurasjon');
+      }
+      const data = await response.json();
+      const cfg = data.config || {};
+      setGeminiConfig({
+        temperature: cfg.temperature ?? '',
+        top_p: cfg.top_p ?? '',
+        media_resolution: cfg.media_resolution || ''
+      });
+      setMessage('Gemini-konfigurasjonen er lagret.');
+    } catch (err) {
+      setError(err.message || 'Ukjent feil ved lagring av Gemini-konfigurasjon');
+    } finally {
+      setIsGeminiConfigSaving(false);
+    }
+  };
+
   const maskValue = (key) => {
     if (!key.configured) {
       return 'Ikke konfigurert';
@@ -1253,6 +1311,90 @@ const AdminDashboard = () => {
                     {isPromptSaving ? 'Lagrer...' : 'Lagre prompt'}
                   </Button>
                 </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 space-y-5">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-semibold">Gemini-innstillinger</h2>
+              <p className="text-slate-400 text-sm mt-1">
+                Juster temperatur, topp‑P og oppløsning for Gemini 3 Pro.
+              </p>
+            </div>
+          </div>
+          {isGeminiConfigLoading ? (
+            <p className="text-sm text-slate-400">Laster Gemini-innstillinger...</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1 tracking-wide">
+                    TEMPERATUR
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    max="2"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-0"
+                    placeholder="Standard"
+                    value={geminiConfig.temperature}
+                    onChange={(e) =>
+                      setGeminiConfig((prev) => ({ ...prev, temperature: e.target.value }))
+                    }
+                  />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Tomt felt bruker modellens standardverdi.
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1 tracking-wide">
+                    TOP‑P
+                  </label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    max="1"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-0"
+                    placeholder="Standard"
+                    value={geminiConfig.top_p}
+                    onChange={(e) =>
+                      setGeminiConfig((prev) => ({ ...prev, top_p: e.target.value }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1 tracking-wide">
+                    MEDIA-RESOLUSJON
+                  </label>
+                  <select
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-0"
+                    value={geminiConfig.media_resolution}
+                    onChange={(e) =>
+                      setGeminiConfig((prev) => ({ ...prev, media_resolution: e.target.value }))
+                    }
+                  >
+                    <option value="">Standard</option>
+                    <option value="low">Lav</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">Høy</option>
+                  </select>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Gjelder analyse av bilder/PDF.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center justify-end">
+                <Button
+                  onClick={handleGeminiConfigSave}
+                  disabled={isGeminiConfigSaving || isGeminiConfigLoading}
+                >
+                  {isGeminiConfigSaving ? 'Lagrer...' : 'Lagre Gemini-innstillinger'}
+                </Button>
               </div>
             </>
           )}
