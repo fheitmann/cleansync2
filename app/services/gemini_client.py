@@ -9,8 +9,10 @@ from typing import Any, Dict, List, Optional
 
 from google import genai
 from google.genai import types
+from pydantic import ValidationError
 
 from app.models.schemas import (
+    ALL_DAYS,
     CleaningPlan,
     CleaningPlanEntry,
     FloorPlanOptions,
@@ -20,6 +22,22 @@ from app.services import config_store
 
 DEFAULT_MODEL = "gemini-3-pro-preview"
 DEFAULT_KEY_NAME = "gemini"
+DAY_ALIASES = {
+    "MONDAY": "MAN",
+    "MON": "MAN",
+    "TUESDAY": "TIRS",
+    "TUE": "TIRS",
+    "WEDNESDAY": "ONS",
+    "WED": "ONS",
+    "THURSDAY": "TORS",
+    "THU": "TORS",
+    "FRIDAY": "FRE",
+    "FRI": "FRE",
+    "SATURDAY": "LØR",
+    "SAT": "LØR",
+    "SUNDAY": "SØN",
+    "SUN": "SØN",
+}
 
 try:
     MODALITY_TEXT = types.Modality.TEXT
@@ -145,6 +163,12 @@ class GeminiClient:
         return await asyncio.to_thread(_run)
 
     @staticmethod
+    def _to_bool(value: Any) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "x", "yes", "on"}
+        return bool(value)
+
+    @staticmethod
     def _parse_rooms(payload: Any, fallback_id_prefix: str) -> List[Room]:
         if isinstance(payload, dict):
             rooms_data = payload.get("rooms") or payload.get("entries") or []
@@ -170,6 +194,72 @@ class GeminiClient:
                 )
             )
         return rooms
+
+    @staticmethod
+    def _build_plan_from_dict(payload: Any, default_template: str) -> CleaningPlan:
+        if isinstance(payload, dict):
+            entries_data = payload.get("entries") or payload.get("rooms") or []
+            total_area = payload.get("total_area_m2")
+            template_label = payload.get("template_name") or default_template
+        else:
+            entries_data = payload
+            total_area = None
+            template_label = default_template
+        entries: List[CleaningPlanEntry] = []
+        for entry in entries_data:
+            if not isinstance(entry, dict):
+                continue
+            # Normalize possible keys from older prompts
+            room_name = (
+                entry.get("room_name")
+                or entry.get("name")
+                or entry.get("area")
+                or "Rom"
+            )
+            area = entry.get("area_m2") or entry.get("area") or entry.get("square_meters")
+            area_value: Optional[float] = None
+            if isinstance(area, (int, float)):
+                area_value = float(area)
+            elif isinstance(area, str):
+                cleaned = area.replace(",", ".").split()[0]
+                try:
+                    area_value = float(cleaned)
+                except ValueError:
+                    area_value = None
+            floor = entry.get("floor") or entry.get("etg")
+            description = entry.get("description") or entry.get("descr") or ""
+            raw_frequency = entry.get("frequency")
+            frequency: Dict[str, bool] = {}
+            if isinstance(raw_frequency, dict):
+                for key, value in raw_frequency.items():
+                    if not isinstance(key, str):
+                        continue
+                    normalized = DAY_ALIASES.get(key.strip().upper(), key.strip().upper())
+                    if normalized in ALL_DAYS:
+                        frequency[normalized] = GeminiClient._to_bool(value)
+            for key, value in entry.items():
+                if not isinstance(key, str):
+                    continue
+                normalized = DAY_ALIASES.get(key.strip().upper(), key.strip().upper())
+                if normalized in ALL_DAYS and normalized not in frequency:
+                    frequency[normalized] = GeminiClient._to_bool(value)
+            notes = entry.get("notes")
+            entries.append(
+                CleaningPlanEntry(
+                    room_name=str(room_name),
+                    area_m2=area_value,
+                    floor=floor,
+                    description=str(description),
+                    frequency=frequency,
+                    notes=notes,
+                )
+            )
+        total_area_resolved = total_area or sum(entry.area_m2 or 0 for entry in entries)
+        return CleaningPlan(
+            entries=entries,
+            total_area_m2=total_area_resolved,
+            template_name=template_label,
+        )
 
     async def analyze_floorplan(
         self, file_path: Path, options: FloorPlanOptions
@@ -220,8 +310,11 @@ class GeminiClient:
             response_mime_type="application/json",
             response_json_schema=CleaningPlan.model_json_schema(),
         )
-        plan = CleaningPlan.model_validate_json(raw_response)
-        return plan
+        try:
+            return CleaningPlan.model_validate_json(raw_response)
+        except ValidationError:
+            data = _load_json(raw_response)
+            return self._build_plan_from_dict(data, template_label)
 
     async def convert_to_cleansync(self, raw_text: str) -> CleaningPlan:
         base_prompt = self._get_prompt_text()
@@ -239,5 +332,8 @@ class GeminiClient:
             response_mime_type="application/json",
             response_json_schema=CleaningPlan.model_json_schema(),
         )
-        plan = CleaningPlan.model_validate_json(raw_response)
-        return plan
+        try:
+            return CleaningPlan.model_validate_json(raw_response)
+        except ValidationError:
+            data = _load_json(raw_response)
+            return self._build_plan_from_dict(data, "Cleansync Standard")
