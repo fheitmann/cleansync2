@@ -23,7 +23,8 @@ from app.models.schemas import (
     GeminiConfigUpdateRequest,
     FloorPlanOptions,
     GeneratePlanRequest,
-    GeneratePlanResponse,
+    GeneratePlanJobResponse,
+    GeneratePlanStatusResponse,
     Room,
     SystemPromptResponse,
     SystemPromptUpdateRequest,
@@ -34,10 +35,10 @@ from app.models.schemas import (
     UploadResponse,
 )
 from app.services.batch_runner import BatchRunner
-from app.services.docx_generator import plan_to_docx_bytes
 from app.services import config_store, plan_store
-from app.services.gemini_client import GeminiClient
-from app.services.storage import get_file_path, save_bytes, save_upload_file
+from app.services.gemini_client import GeminiClient, GeminiServiceError
+from app.services.plan_job_runner import PlanJobRunner
+from app.services.storage import get_file_path, save_upload_file
 
 PROMPT_FILE = Path("prompt.txt")
 DEFAULT_PROMPT_TEXT = (
@@ -48,6 +49,7 @@ router = APIRouter(prefix="/api")
 
 gemini_client = GeminiClient()
 batch_runner = BatchRunner()
+plan_job_runner = PlanJobRunner(gemini_client)
 
 
 @router.get("/")
@@ -82,35 +84,43 @@ async def _process_single_file(file_id: str, options: FloorPlanOptions) -> List[
     return await gemini_client.analyze_floorplan(file_path, options)
 
 
-@router.post("/generate-plan", response_model=GeneratePlanResponse)
-async def generate_plan(request: GeneratePlanRequest) -> GeneratePlanResponse:
+def _handle_gemini_error(exc: GeminiServiceError) -> None:
+    status_code = exc.status_code if exc.status_code and exc.status_code >= 400 else 502
+    detail = {
+        "message": str(exc),
+        "source": "gemini",
+        "retryable": exc.is_retryable,
+    }
+    if exc.status_code:
+        detail["status_code"] = exc.status_code
+    if exc.reason:
+        detail["reason"] = exc.reason
+    raise HTTPException(status_code=status_code, detail=detail) from exc
+
+
+@router.post("/generate-plan", response_model=GeneratePlanJobResponse)
+async def generate_plan(request: GeneratePlanRequest) -> GeneratePlanJobResponse:
     if not request.file_ids:
         raise HTTPException(status_code=400, detail="file_ids is required")
-    started = time.perf_counter()
-
-    rooms = []
-    for file_id in request.file_ids:
-        rooms.extend(await _process_single_file(file_id, request.options))
-
-    template_name = None
-    if request.template_id:
-        template_path = get_file_path(request.template_id)
-        template_name = await gemini_client.analyze_template(template_path)
-
-    plan = await gemini_client.generate_plan(rooms, template_name=template_name)
-    docx_bytes = plan_to_docx_bytes(plan)
-    docx_id = save_bytes(docx_bytes, suffix=".docx", category="docx")
-    docx_url = f"/download/{docx_id}"
-    duration_ms = int((time.perf_counter() - started) * 1000)
-    plan_store.save_plan(
-        source="generator",
-        request_payload=request.model_dump(),
-        plan=plan,
-        docx_id=docx_id,
-        metadata={"template_id": request.template_id},
-        generation_ms=duration_ms,
+    job = await plan_job_runner.start_job(
+        request.file_ids,
+        request.options,
+        request.template_id,
+        request.model_dump(),
     )
-    return GeneratePlanResponse(plan=plan, docx_url=docx_url)
+    return GeneratePlanJobResponse(job=job)
+
+
+@router.get(
+    "/generate-plan/status/{job_id}", response_model=GeneratePlanStatusResponse
+)
+async def get_generate_plan_status(job_id: str) -> GeneratePlanStatusResponse:
+    try:
+        job = plan_job_runner.get_status(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Job not found") from exc
+    plan = plan_job_runner.get_plan(job_id)
+    return GeneratePlanStatusResponse(job=job, plan=plan, docx_url=job.docx_url)
 
 
 @router.get("/download/{file_id:path}")
@@ -127,15 +137,18 @@ async def convert_plan(file: UploadFile = File(...)) -> ConvertPlanResponse:
         text = raw_bytes.decode("utf-8")
     except UnicodeDecodeError:
         text = raw_bytes.decode("latin-1", errors="ignore")
-    plan = await gemini_client.convert_to_cleansync(text)
-    plan_store.save_plan(
-        source="converter",
-        request_payload={"filename": file.filename},
-        plan=plan,
-        docx_id=None,
-        generation_ms=int((time.perf_counter() - started) * 1000),
-    )
-    return ConvertPlanResponse(plan=plan)
+    try:
+        plan = await gemini_client.convert_to_cleansync(text)
+        plan_store.save_plan(
+            source="converter",
+            request_payload={"filename": file.filename},
+            plan=plan,
+            docx_id=None,
+            generation_ms=int((time.perf_counter() - started) * 1000),
+        )
+        return ConvertPlanResponse(plan=plan)
+    except GeminiServiceError as exc:
+        _handle_gemini_error(exc)
 
 
 @router.post("/batch/run", response_model=BatchStatusResponse)

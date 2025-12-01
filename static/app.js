@@ -21694,7 +21694,73 @@ var Trash2 = createLucideIcon("trash-2", __iconNode14);
 var defaultApiBase = typeof window !== "undefined" && `${window.location.origin}/api` || "http://localhost:8000/api";
 var API_BASE = typeof window !== "undefined" && window.__CLEAN_SYNC_API_BASE__ || defaultApiBase;
 var ALL_DAYS = ["MAN", "TIRS", "ONS", "TORS", "FRE", "L\xD8R", "S\xD8N"];
-var getLoadingMessage = () => Math.random() < 0.25 ? "Analyserer plantegning" : "Genererer renholdsplan";
+var PLAN_STATUS_POLL_MS = 1e4;
+var MIN_WAIT_MS = 60 * 1e3;
+var safeJsonParse = (text) => {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    return null;
+  }
+};
+var formatDetailList = (detail) => {
+  if (!Array.isArray(detail)) return "";
+  return detail.map((item) => {
+    if (!item) return "";
+    if (typeof item === "string") return item;
+    if (typeof item.msg === "string") return item.msg;
+    if (typeof item.message === "string") return item.message;
+    if (typeof item.detail === "string") return item.detail;
+    try {
+      return JSON.stringify(item);
+    } catch (e) {
+      return "";
+    }
+  }).filter(Boolean).join(", ");
+};
+var buildApiErrorMessage = (payload, fallbackMessage, status, rawText) => {
+  const fallback = fallbackMessage || (status && status >= 500 ? "Serverfeil. Pr\xF8v igjen senere." : "Foresp\xF8rselen mislyktes.");
+  if (payload) {
+    if (typeof payload.detail === "string") {
+      return payload.detail;
+    }
+    if (Array.isArray(payload.detail)) {
+      const formatted = formatDetailList(payload.detail);
+      if (formatted) return formatted;
+    }
+    if (payload.detail && typeof payload.detail === "object") {
+      let message = payload.detail.message || payload.detail.error || fallback;
+      if (payload.detail.retryable && message && !/prøv igjen/i.test(message)) {
+        message = `${message} Pr\xF8v igjen om litt.`;
+      }
+      return message;
+    }
+    if (typeof payload.message === "string") {
+      return payload.message;
+    }
+    if (payload.error) {
+      if (typeof payload.error === "string") {
+        return payload.error;
+      }
+      if (payload.error && typeof payload.error.message === "string") {
+        return payload.error.message;
+      }
+    }
+  }
+  if (rawText && rawText.trim()) {
+    return rawText.trim();
+  }
+  return `${fallback}${status ? ` (kode ${status})` : ""}`;
+};
+var parseApiResponse = async (response, fallbackMessage) => {
+  const rawText = await response.text();
+  const payload = safeJsonParse(rawText);
+  if (!response.ok) {
+    throw new Error(buildApiErrorMessage(payload, fallbackMessage, response.status, rawText));
+  }
+  return payload != null ? payload : {};
+};
 var Button = ({ children, variant = "primary", className = "", onClick, disabled, icon: Icon2, type = "button" }) => {
   const baseStyle = "flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed";
   const variants = {
@@ -21821,6 +21887,8 @@ var GeneratorView = () => {
   const [historyError, setHistoryError] = (0, import_react3.useState)("");
   const [historySelection, setHistorySelection] = (0, import_react3.useState)(null);
   const [isFetchingHistoryPlan, setIsFetchingHistoryPlan] = (0, import_react3.useState)(null);
+  const [activeJob, setActiveJob] = (0, import_react3.useState)(null);
+  const planStatusTimerRef = (0, import_react3.useRef)(null);
   const formatHistoryTimestamp = (value) => {
     if (!value) return "";
     try {
@@ -21830,7 +21898,8 @@ var GeneratorView = () => {
     }
   };
   const fileIds = (0, import_react3.useMemo)(() => uploads.map((file) => file.id), [uploads]);
-  const loadingHeadline = statusMessage || "Genererer renholdsplan";
+  const jobHeadline = (activeJob == null ? void 0 : activeJob.status) === "pending" ? "Jobb i k\xF8..." : (activeJob == null ? void 0 : activeJob.status) === "running" ? "Jobb kj\xF8rer..." : "";
+  const loadingHeadline = statusMessage || jobHeadline || "Genererer renholdsplan";
   const uploadCountDescription = fileIds.length === 1 ? "1 plantegning" : `${fileIds.length} plantegninger`;
   const fetchHistory = (0, import_react3.useCallback)(async () => {
     setHistoryLoading(true);
@@ -21855,15 +21924,112 @@ var GeneratorView = () => {
   (0, import_react3.useEffect)(() => {
     fetchHistory();
   }, [fetchHistory]);
+  const stopPlanPolling = (0, import_react3.useCallback)(() => {
+    if (planStatusTimerRef.current) {
+      clearInterval(planStatusTimerRef.current);
+      planStatusTimerRef.current = null;
+    }
+  }, []);
+  (0, import_react3.useEffect)(() => {
+    return () => stopPlanPolling();
+  }, [stopPlanPolling]);
+  const pollJobStatus = (0, import_react3.useCallback)(
+    (jobId) => {
+      const run = async () => {
+        var _a2, _b2, _c, _d;
+        try {
+          const response = await fetch(`${API_BASE}/generate-plan/status/${jobId}`);
+          const data = await parseApiResponse(response, "Kunne ikke hente jobbstatus");
+          setActiveJob(data.job);
+          if (data.job.status === "success") {
+            stopPlanPolling();
+            setPlanRows(normalizePlanEntries(data.plan));
+            setPlanMeta({
+              totalArea: (_a2 = data.plan) == null ? void 0 : _a2.total_area_m2,
+              templateName: (_b2 = data.plan) == null ? void 0 : _b2.template_name
+            });
+            setDocxUrl(data.docx_url ? `${API_BASE}${data.docx_url}` : "");
+            setProcessingProgress(100);
+            setProcessingStartTime(null);
+            setStep(4);
+            setIsGenerating(false);
+            setStatusMessage("");
+            setActiveJob(null);
+            fetchHistory();
+          } else if (data.job.status === "failed") {
+            stopPlanPolling();
+            const jobMessage = ((_c = data.job.detail) == null ? void 0 : _c.message) || ((_d = data.job.detail) == null ? void 0 : _d.error) || data.job.message || "Generering mislyktes";
+            setError(jobMessage);
+            setProcessingProgress(0);
+            setProcessingStartTime(null);
+            setIsGenerating(false);
+            setStatusMessage("");
+            setActiveJob(null);
+            setStep(2);
+          }
+        } catch (err) {
+          stopPlanPolling();
+          setError(err.message);
+          setProcessingProgress(0);
+          setProcessingStartTime(null);
+          setIsGenerating(false);
+          setStatusMessage("");
+          setActiveJob(null);
+          setStep(2);
+        }
+      };
+      run();
+      const schedule = typeof window === "undefined" ? setInterval : window.setInterval;
+      planStatusTimerRef.current = schedule(run, PLAN_STATUS_POLL_MS);
+    },
+    [fetchHistory, stopPlanPolling]
+  );
   const DEFAULT_WAIT_MS = 3 * 60 * 1e3;
   const estimatedDurationMs = (0, import_react3.useMemo)(() => {
-    const durations = history.filter((item) => item.source === "generator" && typeof item.generation_seconds === "number").slice(0, 5).map((item) => item.generation_seconds * 1e3);
-    if (!durations.length) {
+    const runs = history.filter(
+      (item) => item.source === "generator" && typeof item.generation_seconds === "number" && !Number.isNaN(item.generation_seconds)
+    ).slice(0, 20);
+    if (!runs.length) {
       return DEFAULT_WAIT_MS;
     }
-    const avg = durations.reduce((sum, value) => sum + value, 0) / durations.length;
-    return Math.max(60 * 1e3, Math.round(avg));
-  }, [history]);
+    const avgSeconds = runs.reduce((sum, item) => sum + (item.generation_seconds || 0), 0) / runs.length;
+    const toMs = (seconds) => Math.max(MIN_WAIT_MS, Math.round(seconds * 1e3));
+    const matching = runs.filter(
+      (item) => {
+        var _a2;
+        return typeof ((_a2 = item.metadata) == null ? void 0 : _a2.file_count) === "number" && item.metadata.file_count === fileIds.length && fileIds.length > 0;
+      }
+    );
+    if (matching.length) {
+      const matchAvgSeconds = matching.reduce((sum, item) => sum + (item.generation_seconds || 0), 0) / matching.length;
+      return toMs(matchAvgSeconds);
+    }
+    const withCounts = runs.filter(
+      (item) => {
+        var _a2;
+        return typeof ((_a2 = item.metadata) == null ? void 0 : _a2.file_count) === "number" && item.metadata.file_count > 0;
+      }
+    );
+    if (withCounts.length && fileIds.length > 0) {
+      const totalSeconds = withCounts.reduce(
+        (sum, item) => sum + (item.generation_seconds || 0),
+        0
+      );
+      const totalFiles = withCounts.reduce(
+        (sum, item) => {
+          var _a2;
+          return sum + (((_a2 = item.metadata) == null ? void 0 : _a2.file_count) || 0);
+        },
+        0
+      );
+      if (totalFiles > 0) {
+        const perFileSeconds = totalSeconds / totalFiles;
+        return toMs(perFileSeconds * fileIds.length);
+      }
+    }
+    return toMs(avgSeconds);
+  }, [history, fileIds.length]);
+  const estimatedMinutes = Math.max(1, Math.round(estimatedDurationMs / 6e4));
   const handleFileUpload = async (event) => {
     const selectedFiles = Array.from(event.target.files || []);
     event.target.value = "";
@@ -21877,10 +22043,7 @@ var GeneratorView = () => {
         method: "POST",
         body
       });
-      if (!response.ok) {
-        throw new Error("Kunne ikke laste opp plantegninger");
-      }
-      const data = await response.json();
+      const data = await parseApiResponse(response, "Kunne ikke laste opp plantegninger");
       const mapped = data.file_ids.map((id, index) => ({
         id,
         name: selectedFiles[index].name,
@@ -21897,6 +22060,8 @@ var GeneratorView = () => {
     setUploads((prev) => prev.filter((file) => file.id !== id));
   };
   const clearFiles = () => {
+    stopPlanPolling();
+    setActiveJob(null);
     setUploads([]);
     setPlanRows([]);
     setPlanMeta(null);
@@ -21922,10 +22087,7 @@ var GeneratorView = () => {
         method: "POST",
         body
       });
-      if (!response.ok) {
-        throw new Error("Kunne ikke laste opp mal");
-      }
-      const data = await response.json();
+      const data = await parseApiResponse(response, "Kunne ikke laste opp mal");
       setTemplateMeta({ ...data, originalName: file.name });
     } catch (err) {
       setError(err.message);
@@ -21937,10 +22099,13 @@ var GeneratorView = () => {
       return;
     }
     setError(null);
+    stopPlanPolling();
+    setActiveJob(null);
     setIsGenerating(true);
     setProcessingProgress(5);
     setProcessingStartTime(Date.now());
-    setStatusMessage(getLoadingMessage());
+    const fileDescriptor = fileIds.length > 1 ? ` for ${fileIds.length} plantegninger` : "";
+    setStatusMessage(`Jobb startet \u2013 ansl\xE5tt tid ${estimatedMinutes} min${fileDescriptor}.`);
     setStep(3);
     const payload = {
       file_ids: fileIds,
@@ -21959,28 +22124,16 @@ var GeneratorView = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      if (!response.ok) {
-        throw new Error("Generering mislyktes. Kontroller at backend kj\xF8rer.");
-      }
-      const data = await response.json();
-      setPlanRows(normalizePlanEntries(data.plan));
-      setPlanMeta({
-        totalArea: data.plan.total_area_m2,
-        templateName: data.plan.template_name
-      });
-      setDocxUrl(`${API_BASE}${data.docx_url}`);
-      setProcessingProgress(100);
-      setProcessingStartTime(null);
-      setStep(4);
-      fetchHistory();
+      const data = await parseApiResponse(response, "Kunne ikke starte jobben");
+      setActiveJob(data.job);
+      pollJobStatus(data.job.id);
     } catch (err) {
       setError(err.message);
       setProcessingProgress(0);
       setProcessingStartTime(null);
-      setStep(2);
-    } finally {
       setIsGenerating(false);
       setStatusMessage("");
+      setStep(2);
     }
   };
   const updateRow = (rowId, field, value) => {
@@ -22027,10 +22180,7 @@ var GeneratorView = () => {
     setProcessingStartTime(null);
     try {
       const response = await fetch(`${API_BASE}/plans/${planId}`);
-      if (!response.ok) {
-        throw new Error("Kunne ikke hente lagret plan");
-      }
-      const data = await response.json();
+      const data = await parseApiResponse(response, "Kunne ikke hente lagret plan");
       setPlanRows(normalizePlanEntries(data.plan));
       setPlanMeta({
         totalArea: data.plan.total_area_m2,
@@ -22126,7 +22276,7 @@ var GeneratorView = () => {
     },
     /* @__PURE__ */ import_react3.default.createElement("option", { value: "m" }, "m"),
     /* @__PURE__ */ import_react3.default.createElement("option", { value: "cm" }, "cm")
-  ))))), /* @__PURE__ */ import_react3.default.createElement("div", { className: "mt-8 flex justify-between" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "secondary", onClick: () => setStep(1), disabled: isGenerating || isUploading }, "Tilbake"), /* @__PURE__ */ import_react3.default.createElement(Button, { onClick: handleGeneratePlan, icon: Sparkles, disabled: isGenerating || isUploading }, "Generer plan"))), step === 3 && /* @__PURE__ */ import_react3.default.createElement(Card, { className: "max-w-xl mx-auto p-12 text-center" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "relative w-24 h-24 mx-auto mb-6" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "absolute inset-0 border-4 border-indigo-100 rounded-full" }), /* @__PURE__ */ import_react3.default.createElement("div", { className: "absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin" }), /* @__PURE__ */ import_react3.default.createElement(Sparkles, { className: "absolute inset-0 m-auto text-indigo-600 w-8 h-8 animate-pulse" })), /* @__PURE__ */ import_react3.default.createElement("h2", { className: "text-xl font-bold text-gray-800 mb-2" }, loadingHeadline), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-gray-500 mb-8" }, "Vi jobber med ", uploadCountDescription, " du lastet opp."), /* @__PURE__ */ import_react3.default.createElement(ProgressBar, { progress: processingProgress, label: "Fremdrift" })), step === 4 && /* @__PURE__ */ import_react3.default.createElement("div", { className: "space-y-6 animate-in fade-in" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("h2", { className: "text-2xl font-bold text-gray-800" }, "Gjennomg\xE5 renholdsplan"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-gray-500" }, "Totalt ", planRows.length, " omr\xE5der, ", ((_a = planMeta == null ? void 0 : planMeta.totalArea) == null ? void 0 : _a.toFixed(0)) || 0, " m\xB2 dekket.")), /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex gap-3" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "secondary", onClick: clearFiles, icon: RefreshCw }, "Start p\xE5 nytt"), /* @__PURE__ */ import_react3.default.createElement(Button, { onClick: downloadDocx, icon: Download, disabled: !docxUrl }, "Last ned DOCX"))), /* @__PURE__ */ import_react3.default.createElement(Card, { className: "overflow-hidden" }, /* @__PURE__ */ import_react3.default.createElement(PlanTable, { rows: planRows, onUpdateRow: updateRow, onToggleDay: toggleDay }), /* @__PURE__ */ import_react3.default.createElement("div", { className: "p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center flex-wrap gap-2" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "ghost", icon: Plus, onClick: addRow }, "Legg til omr\xE5de"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Basert p\xE5 instruksjonene satt i adminpanelet."))), planMeta && /* @__PURE__ */ import_react3.default.createElement(Card, { className: "p-6" }, /* @__PURE__ */ import_react3.default.createElement("h3", { className: "font-semibold text-gray-800 mb-2" }, "Oppsummering"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-600" }, "Planen dekker ca. ", ((_b = planMeta.totalArea) == null ? void 0 : _b.toFixed(0)) || "0", " m\xB2.", planMeta.templateName && ` Mal: ${planMeta.templateName}.`))), /* @__PURE__ */ import_react3.default.createElement(Card, { className: "mt-8" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-start justify-between mb-4" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("h3", { className: "font-semibold text-gray-800" }, "Tidligere genereringer"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "\xC5pne eller last ned tidligere planer uten \xE5 kj\xF8re analysen p\xE5 nytt.")), /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "ghost", onClick: fetchHistory, disabled: historyLoading }, "Oppdater")), historyError && /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-red-500 mb-3" }, historyError), historyLoading ? /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Laster historikk...") : history.length === 0 ? /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Ingen lagrede planer enn\xE5.") : /* @__PURE__ */ import_react3.default.createElement("ul", { className: "divide-y divide-gray-100" }, history.map((item) => {
+  ))))), /* @__PURE__ */ import_react3.default.createElement("div", { className: "mt-8 flex justify-between" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "secondary", onClick: () => setStep(1), disabled: isGenerating || isUploading }, "Tilbake"), /* @__PURE__ */ import_react3.default.createElement(Button, { onClick: handleGeneratePlan, icon: Sparkles, disabled: isGenerating || isUploading }, "Generer plan"))), step === 3 && /* @__PURE__ */ import_react3.default.createElement(Card, { className: "max-w-xl mx-auto p-12 text-center" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "relative w-24 h-24 mx-auto mb-6" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "absolute inset-0 border-4 border-indigo-100 rounded-full" }), /* @__PURE__ */ import_react3.default.createElement("div", { className: "absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin" }), /* @__PURE__ */ import_react3.default.createElement(Sparkles, { className: "absolute inset-0 m-auto text-indigo-600 w-8 h-8 animate-pulse" })), /* @__PURE__ */ import_react3.default.createElement("h2", { className: "text-xl font-bold text-gray-800 mb-2" }, loadingHeadline), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-gray-500 mb-8" }, "Vi jobber med ", uploadCountDescription, " du lastet opp."), /* @__PURE__ */ import_react3.default.createElement(ProgressBar, { progress: processingProgress, label: "Fremdrift" }), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500 mt-4" }, "Forventet tid ca. ", estimatedMinutes, " min", fileIds.length > 1 ? ` for ${fileIds.length} plantegninger` : "", ".")), step === 4 && /* @__PURE__ */ import_react3.default.createElement("div", { className: "space-y-6 animate-in fade-in" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("h2", { className: "text-2xl font-bold text-gray-800" }, "Gjennomg\xE5 renholdsplan"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-gray-500" }, "Totalt ", planRows.length, " omr\xE5der, ", ((_a = planMeta == null ? void 0 : planMeta.totalArea) == null ? void 0 : _a.toFixed(0)) || 0, " m\xB2 dekket.")), /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex gap-3" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "secondary", onClick: clearFiles, icon: RefreshCw }, "Start p\xE5 nytt"), /* @__PURE__ */ import_react3.default.createElement(Button, { onClick: downloadDocx, icon: Download, disabled: !docxUrl }, "Last ned DOCX"))), /* @__PURE__ */ import_react3.default.createElement(Card, { className: "overflow-hidden" }, /* @__PURE__ */ import_react3.default.createElement(PlanTable, { rows: planRows, onUpdateRow: updateRow, onToggleDay: toggleDay }), /* @__PURE__ */ import_react3.default.createElement("div", { className: "p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center flex-wrap gap-2" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "ghost", icon: Plus, onClick: addRow }, "Legg til omr\xE5de"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Basert p\xE5 instruksjonene satt i adminpanelet."))), planMeta && /* @__PURE__ */ import_react3.default.createElement(Card, { className: "p-6" }, /* @__PURE__ */ import_react3.default.createElement("h3", { className: "font-semibold text-gray-800 mb-2" }, "Oppsummering"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-600" }, "Planen dekker ca. ", ((_b = planMeta.totalArea) == null ? void 0 : _b.toFixed(0)) || "0", " m\xB2.", planMeta.templateName && ` Mal: ${planMeta.templateName}.`))), /* @__PURE__ */ import_react3.default.createElement(Card, { className: "mt-8" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-start justify-between mb-4" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("h3", { className: "font-semibold text-gray-800" }, "Tidligere genereringer"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "\xC5pne eller last ned tidligere planer uten \xE5 kj\xF8re analysen p\xE5 nytt.")), /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "ghost", onClick: fetchHistory, disabled: historyLoading }, "Oppdater")), historyError && /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-red-500 mb-3" }, historyError), historyLoading ? /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Laster historikk...") : history.length === 0 ? /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Ingen lagrede planer enn\xE5.") : /* @__PURE__ */ import_react3.default.createElement("ul", { className: "divide-y divide-gray-100" }, history.map((item) => {
     var _a2;
     return /* @__PURE__ */ import_react3.default.createElement("li", { key: item.id, className: "py-3 flex items-center justify-between flex-wrap gap-2" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm font-medium text-gray-800" }, ((_a2 = item.metadata) == null ? void 0 : _a2.template_id) ? "Generator (mal)" : item.source === "converter" ? "Konvertering" : item.source === "batch" ? "Batch" : "Generator"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-xs text-gray-500" }, formatHistoryTimestamp(item.created_at))), /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-center gap-2" }, item.docx_url && /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "ghost", className: "text-xs", onClick: () => openHistoryDocx(item.docx_url) }, "DOCX"), /* @__PURE__ */ import_react3.default.createElement(
       Button,
@@ -22161,10 +22311,7 @@ var ConverterView = () => {
         method: "POST",
         body
       });
-      if (!response.ok) {
-        throw new Error("Konvertering mislyktes");
-      }
-      const data = await response.json();
+      const data = await parseApiResponse(response, "Konvertering mislyktes");
       setRows(normalizePlanEntries(data.plan));
       setPlanMeta({ totalArea: data.plan.total_area_m2, templateName: data.plan.template_name });
     } catch (err) {
@@ -22193,15 +22340,16 @@ var BatchView = () => {
     const interval = setInterval(async () => {
       try {
         const response = await fetch(`${API_BASE}/batch/status/${batchJob.id}`);
-        if (!response.ok) return;
-        const data = await response.json();
+        const data = await parseApiResponse(response, "Kunne ikke hente batchstatus");
         setBatchJob(data.job);
+        if (data.job.status === "failed" && data.job.message) {
+          setError(data.job.message);
+          return;
+        }
         if (data.job.status === "success") {
           const resultsResponse = await fetch(`${API_BASE}/batch/results/${data.job.id}`);
-          if (resultsResponse.ok) {
-            const results = await resultsResponse.json();
-            setBatchPlans(results.plans || []);
-          }
+          const results = await parseApiResponse(resultsResponse, "Kunne ikke hente batchresultater");
+          setBatchPlans(results.plans || []);
         }
       } catch (err) {
         setError(err.message);
@@ -22222,10 +22370,7 @@ var BatchView = () => {
         method: "POST",
         body
       });
-      if (!response.ok) {
-        throw new Error("Opplasting feilet");
-      }
-      const data = await response.json();
+      const data = await parseApiResponse(response, "Opplasting feilet");
       const mapped = data.file_ids.map((id, index) => ({
         id,
         name: selectedFiles[index].name,
@@ -22258,10 +22403,7 @@ var BatchView = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      if (!response.ok) {
-        throw new Error("Kunne ikke starte batchjobb");
-      }
-      const data = await response.json();
+      const data = await parseApiResponse(response, "Kunne ikke starte batchjobb");
       setBatchJob(data.job);
       setBatchPlans([]);
     } catch (err) {
@@ -22284,7 +22426,7 @@ var BatchView = () => {
       checked: options.hasArea,
       onChange: () => setOptions((prev) => ({ ...prev, hasArea: !prev.hasArea }))
     }
-  ), "Areal (m\xB2) tilstede"), batchJob && /* @__PURE__ */ import_react3.default.createElement("div", { className: "mt-4 text-sm text-gray-600" }, "Status: ", /* @__PURE__ */ import_react3.default.createElement("span", { className: "font-semibold" }, batchJob.status), " (", batchJob.processed_files, "/", batchJob.total_files, ")")))), /* @__PURE__ */ import_react3.default.createElement(Card, { className: "p-6" }, /* @__PURE__ */ import_react3.default.createElement("h3", { className: "font-semibold text-gray-800 mb-4" }, "Opplastede filer"), uploads.length === 0 ? /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Ingen filer i batchk\xF8en.") : /* @__PURE__ */ import_react3.default.createElement("ul", { className: "space-y-2" }, uploads.map((file) => /* @__PURE__ */ import_react3.default.createElement("li", { key: file.id, className: "flex items-center justify-between bg-white p-3 rounded-lg border border-gray-100" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-800" }, file.name), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-xs text-gray-400" }, formatBytes(file.size))), /* @__PURE__ */ import_react3.default.createElement("span", { className: "text-xs text-gray-500" }, "ID: ", file.id.slice(-6)))))), batchPlans.length > 0 && /* @__PURE__ */ import_react3.default.createElement(Card, { className: "p-6" }, /* @__PURE__ */ import_react3.default.createElement("h3", { className: "font-semibold text-gray-800 mb-4" }, "Resultater"), /* @__PURE__ */ import_react3.default.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-4" }, batchPlans.map((plan, index) => {
+  ), "Areal (m\xB2) tilstede"), batchJob && /* @__PURE__ */ import_react3.default.createElement("div", { className: "mt-4 text-sm text-gray-600" }, "Status: ", /* @__PURE__ */ import_react3.default.createElement("span", { className: "font-semibold" }, batchJob.status), " (", batchJob.processed_files, "/", batchJob.total_files, ")", batchJob.message && /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-xs text-gray-500 mt-1" }, batchJob.status === "failed" ? "Feil:" : "Info:", " ", batchJob.message))))), /* @__PURE__ */ import_react3.default.createElement(Card, { className: "p-6" }, /* @__PURE__ */ import_react3.default.createElement("h3", { className: "font-semibold text-gray-800 mb-4" }, "Opplastede filer"), uploads.length === 0 ? /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Ingen filer i batchk\xF8en.") : /* @__PURE__ */ import_react3.default.createElement("ul", { className: "space-y-2" }, uploads.map((file) => /* @__PURE__ */ import_react3.default.createElement("li", { key: file.id, className: "flex items-center justify-between bg-white p-3 rounded-lg border border-gray-100" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-800" }, file.name), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-xs text-gray-400" }, formatBytes(file.size))), /* @__PURE__ */ import_react3.default.createElement("span", { className: "text-xs text-gray-500" }, "ID: ", file.id.slice(-6)))))), batchPlans.length > 0 && /* @__PURE__ */ import_react3.default.createElement(Card, { className: "p-6" }, /* @__PURE__ */ import_react3.default.createElement("h3", { className: "font-semibold text-gray-800 mb-4" }, "Resultater"), /* @__PURE__ */ import_react3.default.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-4" }, batchPlans.map((plan, index) => {
     var _a, _b, _c;
     return /* @__PURE__ */ import_react3.default.createElement("div", { key: `${plan.template_name || "plan"}-${index}`, className: "border border-gray-100 rounded-lg p-4" }, /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm font-semibold text-gray-700 mb-2" }, "Plan ", index + 1), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-xs text-gray-500 mb-2" }, ((_a = plan.entries) == null ? void 0 : _a.length) || 0, " rom \u2022 ", ((_b = plan.total_area_m2) == null ? void 0 : _b.toFixed(0)) || 0, " m\xB2"), /* @__PURE__ */ import_react3.default.createElement("div", { className: "text-xs text-gray-600 space-y-1" }, (_c = plan.entries) == null ? void 0 : _c.slice(0, 3).map((entry) => {
       var _a2;

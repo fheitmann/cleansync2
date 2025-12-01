@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   LayoutDashboard,
@@ -24,8 +24,82 @@ const API_BASE =
   (typeof window !== 'undefined' && window.__CLEAN_SYNC_API_BASE__) ||
   defaultApiBase;
 const ALL_DAYS = ['MAN', 'TIRS', 'ONS', 'TORS', 'FRE', 'LØR', 'SØN'];
+const PLAN_STATUS_POLL_MS = 10000;
+const MIN_WAIT_MS = 60 * 1000;
 const getLoadingMessage = () =>
   Math.random() < 0.25 ? 'Analyserer plantegning' : 'Genererer renholdsplan';
+const safeJsonParse = (text) => {
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+};
+const formatDetailList = (detail) => {
+  if (!Array.isArray(detail)) return '';
+  return detail
+    .map((item) => {
+      if (!item) return '';
+      if (typeof item === 'string') return item;
+      if (typeof item.msg === 'string') return item.msg;
+      if (typeof item.message === 'string') return item.message;
+      if (typeof item.detail === 'string') return item.detail;
+      try {
+        return JSON.stringify(item);
+      } catch {
+        return '';
+      }
+    })
+    .filter(Boolean)
+    .join(', ');
+};
+const buildApiErrorMessage = (payload, fallbackMessage, status, rawText) => {
+  const fallback =
+    fallbackMessage ||
+    (status && status >= 500
+      ? 'Serverfeil. Prøv igjen senere.'
+      : 'Forespørselen mislyktes.');
+  if (payload) {
+    if (typeof payload.detail === 'string') {
+      return payload.detail;
+    }
+    if (Array.isArray(payload.detail)) {
+      const formatted = formatDetailList(payload.detail);
+      if (formatted) return formatted;
+    }
+    if (payload.detail && typeof payload.detail === 'object') {
+      let message = payload.detail.message || payload.detail.error || fallback;
+      if (payload.detail.retryable && message && !/prøv igjen/i.test(message)) {
+        message = `${message} Prøv igjen om litt.`;
+      }
+      return message;
+    }
+    if (typeof payload.message === 'string') {
+      return payload.message;
+    }
+    if (payload.error) {
+      if (typeof payload.error === 'string') {
+        return payload.error;
+      }
+      if (payload.error && typeof payload.error.message === 'string') {
+        return payload.error.message;
+      }
+    }
+  }
+  if (rawText && rawText.trim()) {
+    return rawText.trim();
+  }
+  return `${fallback}${status ? ` (kode ${status})` : ''}`;
+};
+const parseApiResponse = async (response, fallbackMessage) => {
+  const rawText = await response.text();
+  const payload = safeJsonParse(rawText);
+  if (!response.ok) {
+    throw new Error(buildApiErrorMessage(payload, fallbackMessage, response.status, rawText));
+  }
+  return payload ?? {};
+};
 
 const Button = ({ children, variant = 'primary', className = '', onClick, disabled, icon: Icon, type = 'button' }) => {
   const baseStyle = 'flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed';
@@ -208,6 +282,8 @@ const GeneratorView = () => {
   const [historyError, setHistoryError] = useState('');
   const [historySelection, setHistorySelection] = useState(null);
   const [isFetchingHistoryPlan, setIsFetchingHistoryPlan] = useState(null);
+  const [activeJob, setActiveJob] = useState(null);
+  const planStatusTimerRef = useRef(null);
 
   const formatHistoryTimestamp = (value) => {
     if (!value) return '';
@@ -219,7 +295,13 @@ const GeneratorView = () => {
   };
 
   const fileIds = useMemo(() => uploads.map((file) => file.id), [uploads]);
-  const loadingHeadline = statusMessage || 'Genererer renholdsplan';
+  const jobHeadline =
+    activeJob?.status === 'pending'
+      ? 'Jobb i kø...'
+      : activeJob?.status === 'running'
+        ? 'Jobb kjører...'
+        : '';
+  const loadingHeadline = statusMessage || jobHeadline || 'Genererer renholdsplan';
   const uploadCountDescription = fileIds.length === 1 ? '1 plantegning' : `${fileIds.length} plantegninger`;
 
   const fetchHistory = useCallback(async () => {
@@ -247,18 +329,120 @@ const GeneratorView = () => {
     fetchHistory();
   }, [fetchHistory]);
 
+  const stopPlanPolling = useCallback(() => {
+    if (planStatusTimerRef.current) {
+      clearInterval(planStatusTimerRef.current);
+      planStatusTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => stopPlanPolling();
+  }, [stopPlanPolling]);
+
+  const pollJobStatus = useCallback(
+    (jobId) => {
+      const run = async () => {
+        try {
+          const response = await fetch(`${API_BASE}/generate-plan/status/${jobId}`);
+          const data = await parseApiResponse(response, 'Kunne ikke hente jobbstatus');
+          setActiveJob(data.job);
+          if (data.job.status === 'success') {
+            stopPlanPolling();
+            setPlanRows(normalizePlanEntries(data.plan));
+            setPlanMeta({
+              totalArea: data.plan?.total_area_m2,
+              templateName: data.plan?.template_name
+            });
+            setDocxUrl(data.docx_url ? `${API_BASE}${data.docx_url}` : '');
+            setProcessingProgress(100);
+            setProcessingStartTime(null);
+            setStep(4);
+            setIsGenerating(false);
+            setStatusMessage('');
+            setActiveJob(null);
+            fetchHistory();
+          } else if (data.job.status === 'failed') {
+            stopPlanPolling();
+            const jobMessage =
+              data.job.detail?.message ||
+              data.job.detail?.error ||
+              data.job.message ||
+              'Generering mislyktes';
+            setError(jobMessage);
+            setProcessingProgress(0);
+            setProcessingStartTime(null);
+            setIsGenerating(false);
+            setStatusMessage('');
+            setActiveJob(null);
+            setStep(2);
+          }
+        } catch (err) {
+          stopPlanPolling();
+          setError(err.message);
+          setProcessingProgress(0);
+          setProcessingStartTime(null);
+          setIsGenerating(false);
+          setStatusMessage('');
+          setActiveJob(null);
+          setStep(2);
+        }
+      };
+      run();
+      const schedule = typeof window === 'undefined' ? setInterval : window.setInterval;
+      planStatusTimerRef.current = schedule(run, PLAN_STATUS_POLL_MS);
+    },
+    [fetchHistory, stopPlanPolling]
+  );
+
   const DEFAULT_WAIT_MS = 3 * 60 * 1000;
   const estimatedDurationMs = useMemo(() => {
-    const durations = history
-      .filter((item) => item.source === 'generator' && typeof item.generation_seconds === 'number')
-      .slice(0, 5)
-      .map((item) => item.generation_seconds * 1000);
-    if (!durations.length) {
+    const runs = history
+      .filter(
+        (item) =>
+          item.source === 'generator' &&
+          typeof item.generation_seconds === 'number' &&
+          !Number.isNaN(item.generation_seconds)
+      )
+      .slice(0, 20);
+    if (!runs.length) {
       return DEFAULT_WAIT_MS;
     }
-    const avg = durations.reduce((sum, value) => sum + value, 0) / durations.length;
-    return Math.max(60 * 1000, Math.round(avg));
-  }, [history]);
+    const avgSeconds =
+      runs.reduce((sum, item) => sum + (item.generation_seconds || 0), 0) / runs.length;
+    const toMs = (seconds) => Math.max(MIN_WAIT_MS, Math.round(seconds * 1000));
+    const matching = runs.filter(
+      (item) =>
+        typeof item.metadata?.file_count === 'number' &&
+        item.metadata.file_count === fileIds.length &&
+        fileIds.length > 0
+    );
+    if (matching.length) {
+      const matchAvgSeconds =
+        matching.reduce((sum, item) => sum + (item.generation_seconds || 0), 0) /
+        matching.length;
+      return toMs(matchAvgSeconds);
+    }
+    const withCounts = runs.filter(
+      (item) => typeof item.metadata?.file_count === 'number' && item.metadata.file_count > 0
+    );
+    if (withCounts.length && fileIds.length > 0) {
+      const totalSeconds = withCounts.reduce(
+        (sum, item) => sum + (item.generation_seconds || 0),
+        0
+      );
+      const totalFiles = withCounts.reduce(
+        (sum, item) => sum + (item.metadata?.file_count || 0),
+        0
+      );
+      if (totalFiles > 0) {
+        const perFileSeconds = totalSeconds / totalFiles;
+        return toMs(perFileSeconds * fileIds.length);
+      }
+    }
+    return toMs(avgSeconds);
+  }, [history, fileIds.length]);
+  const estimatedMinutes = Math.max(1, Math.round(estimatedDurationMs / 60000));
 
   const handleFileUpload = async (event) => {
     const selectedFiles = Array.from(event.target.files || []);
@@ -273,10 +457,7 @@ const GeneratorView = () => {
         method: 'POST',
         body
       });
-      if (!response.ok) {
-        throw new Error('Kunne ikke laste opp plantegninger');
-      }
-      const data = await response.json();
+      const data = await parseApiResponse(response, 'Kunne ikke laste opp plantegninger');
       const mapped = data.file_ids.map((id, index) => ({
         id,
         name: selectedFiles[index].name,
@@ -295,6 +476,8 @@ const GeneratorView = () => {
   };
 
   const clearFiles = () => {
+    stopPlanPolling();
+    setActiveJob(null);
     setUploads([]);
     setPlanRows([]);
     setPlanMeta(null);
@@ -320,10 +503,7 @@ const GeneratorView = () => {
         method: 'POST',
         body
       });
-      if (!response.ok) {
-        throw new Error('Kunne ikke laste opp mal');
-      }
-      const data = await response.json();
+      const data = await parseApiResponse(response, 'Kunne ikke laste opp mal');
       setTemplateMeta({ ...data, originalName: file.name });
     } catch (err) {
       setError(err.message);
@@ -336,10 +516,13 @@ const GeneratorView = () => {
       return;
     }
     setError(null);
+    stopPlanPolling();
+    setActiveJob(null);
     setIsGenerating(true);
     setProcessingProgress(5);
     setProcessingStartTime(Date.now());
-    setStatusMessage(getLoadingMessage());
+    const fileDescriptor = fileIds.length > 1 ? ` for ${fileIds.length} plantegninger` : '';
+    setStatusMessage(`Jobb startet – anslått tid ${estimatedMinutes} min${fileDescriptor}.`);
     setStep(3);
 
     const payload = {
@@ -360,28 +543,16 @@ const GeneratorView = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      if (!response.ok) {
-        throw new Error('Generering mislyktes. Kontroller at backend kjører.');
-      }
-      const data = await response.json();
-      setPlanRows(normalizePlanEntries(data.plan));
-      setPlanMeta({
-        totalArea: data.plan.total_area_m2,
-        templateName: data.plan.template_name
-      });
-      setDocxUrl(`${API_BASE}${data.docx_url}`);
-      setProcessingProgress(100);
-      setProcessingStartTime(null);
-      setStep(4);
-      fetchHistory();
+      const data = await parseApiResponse(response, 'Kunne ikke starte jobben');
+      setActiveJob(data.job);
+      pollJobStatus(data.job.id);
     } catch (err) {
       setError(err.message);
       setProcessingProgress(0);
       setProcessingStartTime(null);
-      setStep(2);
-    } finally {
       setIsGenerating(false);
       setStatusMessage('');
+      setStep(2);
     }
   };
 
@@ -431,10 +602,7 @@ const GeneratorView = () => {
     setProcessingStartTime(null);
     try {
       const response = await fetch(`${API_BASE}/plans/${planId}`);
-      if (!response.ok) {
-        throw new Error('Kunne ikke hente lagret plan');
-      }
-      const data = await response.json();
+      const data = await parseApiResponse(response, 'Kunne ikke hente lagret plan');
       setPlanRows(normalizePlanEntries(data.plan));
       setPlanMeta({
         totalArea: data.plan.total_area_m2,
@@ -663,6 +831,9 @@ const GeneratorView = () => {
           <h2 className="text-xl font-bold text-gray-800 mb-2">{loadingHeadline}</h2>
           <p className="text-gray-500 mb-8">Vi jobber med {uploadCountDescription} du lastet opp.</p>
           <ProgressBar progress={processingProgress} label="Fremdrift" />
+          <p className="text-sm text-gray-500 mt-4">
+            Forventet tid ca. {estimatedMinutes} min{fileIds.length > 1 ? ` for ${fileIds.length} plantegninger` : ''}.
+          </p>
         </Card>
       )}
 
@@ -777,10 +948,7 @@ const ConverterView = () => {
         method: 'POST',
         body
       });
-      if (!response.ok) {
-        throw new Error('Konvertering mislyktes');
-      }
-      const data = await response.json();
+      const data = await parseApiResponse(response, 'Konvertering mislyktes');
       setRows(normalizePlanEntries(data.plan));
       setPlanMeta({ totalArea: data.plan.total_area_m2, templateName: data.plan.template_name });
     } catch (err) {
@@ -858,15 +1026,16 @@ const BatchView = () => {
     const interval = setInterval(async () => {
       try {
         const response = await fetch(`${API_BASE}/batch/status/${batchJob.id}`);
-        if (!response.ok) return;
-        const data = await response.json();
+        const data = await parseApiResponse(response, 'Kunne ikke hente batchstatus');
         setBatchJob(data.job);
+        if (data.job.status === 'failed' && data.job.message) {
+          setError(data.job.message);
+          return;
+        }
         if (data.job.status === 'success') {
           const resultsResponse = await fetch(`${API_BASE}/batch/results/${data.job.id}`);
-          if (resultsResponse.ok) {
-            const results = await resultsResponse.json();
-            setBatchPlans(results.plans || []);
-          }
+          const results = await parseApiResponse(resultsResponse, 'Kunne ikke hente batchresultater');
+          setBatchPlans(results.plans || []);
         }
       } catch (err) {
         setError(err.message);
@@ -888,10 +1057,7 @@ const BatchView = () => {
         method: 'POST',
         body
       });
-      if (!response.ok) {
-        throw new Error('Opplasting feilet');
-      }
-      const data = await response.json();
+      const data = await parseApiResponse(response, 'Opplasting feilet');
       const mapped = data.file_ids.map((id, index) => ({
         id,
         name: selectedFiles[index].name,
@@ -925,10 +1091,7 @@ const BatchView = () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      if (!response.ok) {
-        throw new Error('Kunne ikke starte batchjobb');
-      }
-      const data = await response.json();
+      const data = await parseApiResponse(response, 'Kunne ikke starte batchjobb');
       setBatchJob(data.job);
       setBatchPlans([]);
     } catch (err) {
@@ -979,6 +1142,11 @@ const BatchView = () => {
             {batchJob && (
               <div className="mt-4 text-sm text-gray-600">
                 Status: <span className="font-semibold">{batchJob.status}</span> ({batchJob.processed_files}/{batchJob.total_files})
+                {batchJob.message && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    {batchJob.status === 'failed' ? 'Feil:' : 'Info:'} {batchJob.message}
+                  </p>
+                )}
               </div>
             )}
           </div>

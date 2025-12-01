@@ -54,11 +54,35 @@ def save_plan(
     return plan_id
 
 
+def _ensure_file_count_metadata(
+    metadata: Optional[dict], request_payload: Optional[Any]
+) -> Optional[dict]:
+    if not request_payload:
+        return metadata
+    try:
+        payload_obj = (
+            request_payload
+            if isinstance(request_payload, dict)
+            else json.loads(request_payload)
+        )
+    except Exception:  # pragma: no cover - defensive
+        return metadata
+    file_ids = payload_obj.get("file_ids") if isinstance(payload_obj, dict) else None
+    if not isinstance(file_ids, list):
+        return metadata
+    file_count = len(file_ids)
+    if file_count <= 0:
+        return metadata
+    merged = dict(metadata or {})
+    merged.setdefault("file_count", file_count)
+    return merged
+
+
 def list_plans(limit: int = 20) -> List[Dict[str, Any]]:
     with get_connection() as conn:
         rows = conn.execute(
             """
-            SELECT id, source, docx_id, metadata, created_at, generation_ms
+            SELECT id, source, docx_id, metadata, request_payload, created_at, generation_ms
             FROM generated_plans
             ORDER BY datetime(created_at) DESC
             LIMIT ?
@@ -67,13 +91,18 @@ def list_plans(limit: int = 20) -> List[Dict[str, Any]]:
         ).fetchall()
     plans: List[Dict[str, Any]] = []
     for row in rows:
+        request_payload = (
+            json.loads(row["request_payload"]) if row["request_payload"] else None
+        )
         metadata = json.loads(row["metadata"]) if row["metadata"] else None
+        metadata = _ensure_file_count_metadata(metadata, request_payload)
         plans.append(
             {
                 "id": row["id"],
                 "source": row["source"],
                 "docx_id": row["docx_id"],
                 "metadata": metadata,
+                "request_payload": request_payload,
                 "created_at": row["created_at"],
                 "generation_ms": row["generation_ms"],
             }
@@ -93,10 +122,11 @@ def get_plan(plan_id: str) -> Dict[str, Any]:
         ).fetchone()
     if not row:
         raise KeyError(plan_id)
-    metadata = json.loads(row["metadata"]) if row["metadata"] else None
     request_payload = (
         json.loads(row["request_payload"]) if row["request_payload"] else None
     )
+    metadata = json.loads(row["metadata"]) if row["metadata"] else None
+    metadata = _ensure_file_count_metadata(metadata, request_payload)
     plan = CleaningPlan.model_validate_json(row["plan_json"])
     return {
         "id": row["id"],

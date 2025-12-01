@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai import types
 
 from app.models.schemas import CleaningPlan, FloorPlanExtraction, FloorPlanOptions, Room
@@ -26,6 +27,21 @@ except AttributeError:  # pragma: no cover - fallback if enum missing
     MODALITY_TEXT = "TEXT"
 
 logger = logging.getLogger(__name__)
+
+
+class GeminiServiceError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: Optional[int] = None,
+        reason: Optional[str] = None,
+        is_retryable: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.reason = reason
+        self.is_retryable = is_retryable
 
 
 class GeminiClient:
@@ -152,6 +168,43 @@ class GeminiClient:
                 pass
         return target
 
+    @staticmethod
+    def _translate_api_error(exc: genai_errors.APIError) -> GeminiServiceError:
+        status_code = getattr(exc, "status_code", None)
+        response_json = getattr(exc, "response_json", None)
+        if response_json is None:
+            response = getattr(exc, "response", None)
+            if response is not None:
+                try:
+                    response_json = response.json()
+                except Exception:  # pragma: no cover - best effort only
+                    response_json = None
+
+        reason: Optional[str] = None
+        message = str(exc)
+        if isinstance(response_json, dict):
+            error_payload = response_json.get("error") or response_json
+            message = error_payload.get("message") or message
+            reason = error_payload.get("status") or error_payload.get("code") or reason
+        elif hasattr(exc, "message"):
+            message = getattr(exc, "message") or message
+
+        retryable_status = {408, 425, 429, 500, 502, 503, 504}
+        is_retryable = status_code in retryable_status
+        logger.warning(
+            "Gemini API error (status=%s, reason=%s): %s",
+            status_code,
+            reason,
+            message,
+        )
+        safe_message = message or "Gemini-modellen returnerte en feil."
+        return GeminiServiceError(
+            safe_message,
+            status_code=status_code,
+            reason=reason,
+            is_retryable=is_retryable,
+        )
+
     def _build_generation_config(
         self,
         *,
@@ -214,7 +267,10 @@ class GeminiClient:
                 response, "output_text", ""
             )
 
-        return await asyncio.to_thread(_run)
+        try:
+            return await asyncio.to_thread(_run)
+        except genai_errors.APIError as exc:
+            raise self._translate_api_error(exc) from exc
 
     @staticmethod
     def _to_bool(value: Any) -> bool:

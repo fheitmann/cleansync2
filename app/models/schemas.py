@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -62,6 +62,33 @@ class GeneratePlanRequest(BaseModel):
 class GeneratePlanResponse(BaseModel):
     plan: CleaningPlan
     docx_url: str
+
+
+class PlanJobStatus(str, Enum):
+    pending = "pending"
+    running = "running"
+    success = "success"
+    failed = "failed"
+
+
+class PlanJob(BaseModel):
+    id: str
+    status: PlanJobStatus = PlanJobStatus.pending
+    docx_url: Optional[str] = None
+    message: Optional[str] = None
+    detail: Optional[Dict[str, Optional[Any]]] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class GeneratePlanJobResponse(BaseModel):
+    job: PlanJob
+
+
+class GeneratePlanStatusResponse(BaseModel):
+    job: PlanJob
+    plan: Optional[CleaningPlan] = None
+    docx_url: Optional[str] = None
 
 
 class ConvertPlanResponse(BaseModel):
