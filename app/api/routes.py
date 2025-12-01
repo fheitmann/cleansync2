@@ -147,7 +147,19 @@ async def run_batch(request: BatchRunRequest) -> BatchStatusResponse:
         rooms = await _process_single_file(file_id, options)
         return await gemini_client.generate_plan(rooms)
 
-    job = await batch_runner.start_job(request.file_ids, request.options, processor)
+    async def batch_processor(file_ids: List[str], options: FloorPlanOptions):
+        room_batches = []
+        for file_id in file_ids:
+            room_batches.append(await _process_single_file(file_id, options))
+        return await gemini_client.generate_plan_batch(room_batches)
+
+    job = await batch_runner.start_job(
+        request.file_ids,
+        request.options,
+        processor,
+        use_batch_api=request.use_batch_api,
+        batch_processor=batch_processor if request.use_batch_api else None,
+    )
     return BatchStatusResponse(job=job)
 
 
@@ -239,14 +251,15 @@ async def get_gemini_config_route() -> GeminiConfigResponse:
 
 @router.post("/admin/gemini-config", response_model=GeminiConfigResponse)
 async def update_gemini_config_route(request: GeminiConfigUpdateRequest) -> GeminiConfigResponse:
-    new_config: dict = {}
-    data = request.model_dump()
-    for key, value in data.items():
-        if value is not None:
-            new_config[key] = value
-    stored = config_store.set_gemini_config(new_config)
-    config = GeminiConfig(**config_store.get_gemini_config())
-    return GeminiConfigResponse(config=config)
+    existing = config_store.get_gemini_config() or {}
+    updated = dict(existing)
+    for key, value in request.model_dump().items():
+        if value is None:
+            updated.pop(key, None)
+        else:
+            updated[key] = value
+    config_store.set_gemini_config(updated)
+    return GeminiConfigResponse(config=GeminiConfig(**updated))
 
 
 def _parse_datetime(value: str) -> datetime:

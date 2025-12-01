@@ -24,6 +24,8 @@ const API_BASE =
   (typeof window !== 'undefined' && window.__CLEAN_SYNC_API_BASE__) ||
   defaultApiBase;
 const ALL_DAYS = ['MAN', 'TIRS', 'ONS', 'TORS', 'FRE', 'LØR', 'SØN'];
+const getLoadingMessage = () =>
+  Math.random() < 0.25 ? 'Analyserer plantegning' : 'Genererer renholdsplan';
 
 const Button = ({ children, variant = 'primary', className = '', onClick, disabled, icon: Icon, type = 'button' }) => {
   const baseStyle = 'flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed';
@@ -217,6 +219,8 @@ const GeneratorView = () => {
   };
 
   const fileIds = useMemo(() => uploads.map((file) => file.id), [uploads]);
+  const loadingHeadline = statusMessage || 'Genererer renholdsplan';
+  const uploadCountDescription = fileIds.length === 1 ? '1 plantegning' : `${fileIds.length} plantegninger`;
 
   const fetchHistory = useCallback(async () => {
     setHistoryLoading(true);
@@ -335,7 +339,7 @@ const GeneratorView = () => {
     setIsGenerating(true);
     setProcessingProgress(5);
     setProcessingStartTime(Date.now());
-    setStatusMessage('Forbereder filer til analyse...');
+    setStatusMessage(getLoadingMessage());
     setStep(3);
 
     const payload = {
@@ -359,9 +363,7 @@ const GeneratorView = () => {
       if (!response.ok) {
         throw new Error('Generering mislyktes. Kontroller at backend kjører.');
       }
-      setStatusMessage('Analyserer rom og arealer...');
       const data = await response.json();
-      setStatusMessage('Genererer tabell og DOCX...');
       setPlanRows(normalizePlanEntries(data.plan));
       setPlanMeta({
         totalArea: data.plan.total_area_m2,
@@ -658,10 +660,9 @@ const GeneratorView = () => {
             <div className="absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
             <Sparkles className="absolute inset-0 m-auto text-indigo-600 w-8 h-8 animate-pulse" />
           </div>
-          <h2 className="text-xl font-bold text-gray-800 mb-2">Analyse pågår...</h2>
-          <p className="text-gray-500 mb-8">analyserer {fileIds.length} plantegning{fileIds.length === 1 ? '' : 'er'}.</p>
-          <ProgressBar progress={processingProgress} label="Analyse fremdrift" />
-          {statusMessage && <p className="text-sm text-gray-500 mt-4">{statusMessage}</p>}
+          <h2 className="text-xl font-bold text-gray-800 mb-2">{loadingHeadline}</h2>
+          <p className="text-gray-500 mb-8">Vi jobber med {uploadCountDescription} du lastet opp.</p>
+          <ProgressBar progress={processingProgress} label="Fremdrift" />
         </Card>
       )}
 

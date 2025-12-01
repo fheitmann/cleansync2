@@ -36,6 +36,10 @@ class CleaningPlan(BaseModel):
     template_name: Optional[str] = None
 
 
+class FloorPlanExtraction(BaseModel):
+    rooms: List[Room]
+
+
 class FloorPlanOptions(BaseModel):
     has_room_names: bool = True
     has_area: bool = True
@@ -86,6 +90,7 @@ class BatchJob(BaseModel):
 class BatchRunRequest(BaseModel):
     file_ids: List[str]
     options: FloorPlanOptions
+    use_batch_api: bool = False
 
 
 class BatchStatusResponse(BaseModel):

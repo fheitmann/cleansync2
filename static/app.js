@@ -21694,6 +21694,7 @@ var Trash2 = createLucideIcon("trash-2", __iconNode14);
 var defaultApiBase = typeof window !== "undefined" && `${window.location.origin}/api` || "http://localhost:8000/api";
 var API_BASE = typeof window !== "undefined" && window.__CLEAN_SYNC_API_BASE__ || defaultApiBase;
 var ALL_DAYS = ["MAN", "TIRS", "ONS", "TORS", "FRE", "L\xD8R", "S\xD8N"];
+var getLoadingMessage = () => Math.random() < 0.25 ? "Analyserer plantegning" : "Genererer renholdsplan";
 var Button = ({ children, variant = "primary", className = "", onClick, disabled, icon: Icon2, type = "button" }) => {
   const baseStyle = "flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed";
   const variants = {
@@ -21829,6 +21830,8 @@ var GeneratorView = () => {
     }
   };
   const fileIds = (0, import_react3.useMemo)(() => uploads.map((file) => file.id), [uploads]);
+  const loadingHeadline = statusMessage || "Genererer renholdsplan";
+  const uploadCountDescription = fileIds.length === 1 ? "1 plantegning" : `${fileIds.length} plantegninger`;
   const fetchHistory = (0, import_react3.useCallback)(async () => {
     setHistoryLoading(true);
     setHistoryError("");
@@ -21937,7 +21940,7 @@ var GeneratorView = () => {
     setIsGenerating(true);
     setProcessingProgress(5);
     setProcessingStartTime(Date.now());
-    setStatusMessage("Forbereder filer til analyse...");
+    setStatusMessage(getLoadingMessage());
     setStep(3);
     const payload = {
       file_ids: fileIds,
@@ -21959,9 +21962,7 @@ var GeneratorView = () => {
       if (!response.ok) {
         throw new Error("Generering mislyktes. Kontroller at backend kj\xF8rer.");
       }
-      setStatusMessage("Analyserer rom og arealer...");
       const data = await response.json();
-      setStatusMessage("Genererer tabell og DOCX...");
       setPlanRows(normalizePlanEntries(data.plan));
       setPlanMeta({
         totalArea: data.plan.total_area_m2,
@@ -22125,7 +22126,7 @@ var GeneratorView = () => {
     },
     /* @__PURE__ */ import_react3.default.createElement("option", { value: "m" }, "m"),
     /* @__PURE__ */ import_react3.default.createElement("option", { value: "cm" }, "cm")
-  ))))), /* @__PURE__ */ import_react3.default.createElement("div", { className: "mt-8 flex justify-between" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "secondary", onClick: () => setStep(1), disabled: isGenerating || isUploading }, "Tilbake"), /* @__PURE__ */ import_react3.default.createElement(Button, { onClick: handleGeneratePlan, icon: Sparkles, disabled: isGenerating || isUploading }, "Generer plan"))), step === 3 && /* @__PURE__ */ import_react3.default.createElement(Card, { className: "max-w-xl mx-auto p-12 text-center" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "relative w-24 h-24 mx-auto mb-6" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "absolute inset-0 border-4 border-indigo-100 rounded-full" }), /* @__PURE__ */ import_react3.default.createElement("div", { className: "absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin" }), /* @__PURE__ */ import_react3.default.createElement(Sparkles, { className: "absolute inset-0 m-auto text-indigo-600 w-8 h-8 animate-pulse" })), /* @__PURE__ */ import_react3.default.createElement("h2", { className: "text-xl font-bold text-gray-800 mb-2" }, "Analyse p\xE5g\xE5r..."), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-gray-500 mb-8" }, "analyserer ", fileIds.length, " plantegning", fileIds.length === 1 ? "" : "er", "."), /* @__PURE__ */ import_react3.default.createElement(ProgressBar, { progress: processingProgress, label: "Analyse fremdrift" }), statusMessage && /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500 mt-4" }, statusMessage)), step === 4 && /* @__PURE__ */ import_react3.default.createElement("div", { className: "space-y-6 animate-in fade-in" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("h2", { className: "text-2xl font-bold text-gray-800" }, "Gjennomg\xE5 renholdsplan"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-gray-500" }, "Totalt ", planRows.length, " omr\xE5der, ", ((_a = planMeta == null ? void 0 : planMeta.totalArea) == null ? void 0 : _a.toFixed(0)) || 0, " m\xB2 dekket.")), /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex gap-3" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "secondary", onClick: clearFiles, icon: RefreshCw }, "Start p\xE5 nytt"), /* @__PURE__ */ import_react3.default.createElement(Button, { onClick: downloadDocx, icon: Download, disabled: !docxUrl }, "Last ned DOCX"))), /* @__PURE__ */ import_react3.default.createElement(Card, { className: "overflow-hidden" }, /* @__PURE__ */ import_react3.default.createElement(PlanTable, { rows: planRows, onUpdateRow: updateRow, onToggleDay: toggleDay }), /* @__PURE__ */ import_react3.default.createElement("div", { className: "p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center flex-wrap gap-2" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "ghost", icon: Plus, onClick: addRow }, "Legg til omr\xE5de"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Basert p\xE5 instruksjonene satt i adminpanelet."))), planMeta && /* @__PURE__ */ import_react3.default.createElement(Card, { className: "p-6" }, /* @__PURE__ */ import_react3.default.createElement("h3", { className: "font-semibold text-gray-800 mb-2" }, "Oppsummering"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-600" }, "Planen dekker ca. ", ((_b = planMeta.totalArea) == null ? void 0 : _b.toFixed(0)) || "0", " m\xB2.", planMeta.templateName && ` Mal: ${planMeta.templateName}.`))), /* @__PURE__ */ import_react3.default.createElement(Card, { className: "mt-8" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-start justify-between mb-4" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("h3", { className: "font-semibold text-gray-800" }, "Tidligere genereringer"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "\xC5pne eller last ned tidligere planer uten \xE5 kj\xF8re analysen p\xE5 nytt.")), /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "ghost", onClick: fetchHistory, disabled: historyLoading }, "Oppdater")), historyError && /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-red-500 mb-3" }, historyError), historyLoading ? /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Laster historikk...") : history.length === 0 ? /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Ingen lagrede planer enn\xE5.") : /* @__PURE__ */ import_react3.default.createElement("ul", { className: "divide-y divide-gray-100" }, history.map((item) => {
+  ))))), /* @__PURE__ */ import_react3.default.createElement("div", { className: "mt-8 flex justify-between" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "secondary", onClick: () => setStep(1), disabled: isGenerating || isUploading }, "Tilbake"), /* @__PURE__ */ import_react3.default.createElement(Button, { onClick: handleGeneratePlan, icon: Sparkles, disabled: isGenerating || isUploading }, "Generer plan"))), step === 3 && /* @__PURE__ */ import_react3.default.createElement(Card, { className: "max-w-xl mx-auto p-12 text-center" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "relative w-24 h-24 mx-auto mb-6" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "absolute inset-0 border-4 border-indigo-100 rounded-full" }), /* @__PURE__ */ import_react3.default.createElement("div", { className: "absolute inset-0 border-4 border-indigo-600 rounded-full border-t-transparent animate-spin" }), /* @__PURE__ */ import_react3.default.createElement(Sparkles, { className: "absolute inset-0 m-auto text-indigo-600 w-8 h-8 animate-pulse" })), /* @__PURE__ */ import_react3.default.createElement("h2", { className: "text-xl font-bold text-gray-800 mb-2" }, loadingHeadline), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-gray-500 mb-8" }, "Vi jobber med ", uploadCountDescription, " du lastet opp."), /* @__PURE__ */ import_react3.default.createElement(ProgressBar, { progress: processingProgress, label: "Fremdrift" })), step === 4 && /* @__PURE__ */ import_react3.default.createElement("div", { className: "space-y-6 animate-in fade-in" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("h2", { className: "text-2xl font-bold text-gray-800" }, "Gjennomg\xE5 renholdsplan"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-gray-500" }, "Totalt ", planRows.length, " omr\xE5der, ", ((_a = planMeta == null ? void 0 : planMeta.totalArea) == null ? void 0 : _a.toFixed(0)) || 0, " m\xB2 dekket.")), /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex gap-3" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "secondary", onClick: clearFiles, icon: RefreshCw }, "Start p\xE5 nytt"), /* @__PURE__ */ import_react3.default.createElement(Button, { onClick: downloadDocx, icon: Download, disabled: !docxUrl }, "Last ned DOCX"))), /* @__PURE__ */ import_react3.default.createElement(Card, { className: "overflow-hidden" }, /* @__PURE__ */ import_react3.default.createElement(PlanTable, { rows: planRows, onUpdateRow: updateRow, onToggleDay: toggleDay }), /* @__PURE__ */ import_react3.default.createElement("div", { className: "p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center flex-wrap gap-2" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "ghost", icon: Plus, onClick: addRow }, "Legg til omr\xE5de"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Basert p\xE5 instruksjonene satt i adminpanelet."))), planMeta && /* @__PURE__ */ import_react3.default.createElement(Card, { className: "p-6" }, /* @__PURE__ */ import_react3.default.createElement("h3", { className: "font-semibold text-gray-800 mb-2" }, "Oppsummering"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-600" }, "Planen dekker ca. ", ((_b = planMeta.totalArea) == null ? void 0 : _b.toFixed(0)) || "0", " m\xB2.", planMeta.templateName && ` Mal: ${planMeta.templateName}.`))), /* @__PURE__ */ import_react3.default.createElement(Card, { className: "mt-8" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-start justify-between mb-4" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("h3", { className: "font-semibold text-gray-800" }, "Tidligere genereringer"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "\xC5pne eller last ned tidligere planer uten \xE5 kj\xF8re analysen p\xE5 nytt.")), /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "ghost", onClick: fetchHistory, disabled: historyLoading }, "Oppdater")), historyError && /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-red-500 mb-3" }, historyError), historyLoading ? /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Laster historikk...") : history.length === 0 ? /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-gray-500" }, "Ingen lagrede planer enn\xE5.") : /* @__PURE__ */ import_react3.default.createElement("ul", { className: "divide-y divide-gray-100" }, history.map((item) => {
     var _a2;
     return /* @__PURE__ */ import_react3.default.createElement("li", { key: item.id, className: "py-3 flex items-center justify-between flex-wrap gap-2" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm font-medium text-gray-800" }, ((_a2 = item.metadata) == null ? void 0 : _a2.template_id) ? "Generator (mal)" : item.source === "converter" ? "Konvertering" : item.source === "batch" ? "Batch" : "Generator"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-xs text-gray-500" }, formatHistoryTimestamp(item.created_at))), /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-center gap-2" }, item.docx_url && /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "ghost", className: "text-xs", onClick: () => openHistoryDocx(item.docx_url) }, "DOCX"), /* @__PURE__ */ import_react3.default.createElement(
       Button,
@@ -22302,6 +22303,9 @@ var AdminDashboard = () => {
   const [promptMeta, setPromptMeta] = (0, import_react3.useState)({ updated_at: null, is_overridden: false });
   const [isPromptLoading, setIsPromptLoading] = (0, import_react3.useState)(true);
   const [isPromptSaving, setIsPromptSaving] = (0, import_react3.useState)(false);
+  const [geminiConfig, setGeminiConfig] = (0, import_react3.useState)({ temperature: "", top_p: "", media_resolution: "" });
+  const [isGeminiConfigLoading, setIsGeminiConfigLoading] = (0, import_react3.useState)(true);
+  const [isGeminiConfigSaving, setIsGeminiConfigSaving] = (0, import_react3.useState)(false);
   const fetchKeys = (0, import_react3.useCallback)(async () => {
     setLoading(true);
     setError("");
@@ -22334,10 +22338,32 @@ var AdminDashboard = () => {
       setIsPromptLoading(false);
     }
   }, []);
+  const loadGeminiConfig = (0, import_react3.useCallback)(async () => {
+    var _a, _b;
+    setIsGeminiConfigLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/admin/gemini-config`);
+      if (!response.ok) {
+        throw new Error("Kunne ikke hente Gemini-konfigurasjon");
+      }
+      const data = await response.json();
+      const cfg = data.config || {};
+      setGeminiConfig({
+        temperature: (_a = cfg.temperature) != null ? _a : "",
+        top_p: (_b = cfg.top_p) != null ? _b : "",
+        media_resolution: cfg.media_resolution || ""
+      });
+    } catch (err) {
+      setError(err.message || "Ukjent feil ved henting av Gemini-konfigurasjon");
+    } finally {
+      setIsGeminiConfigLoading(false);
+    }
+  }, []);
   (0, import_react3.useEffect)(() => {
     fetchKeys();
     loadPrompt();
-  }, [fetchKeys, loadPrompt]);
+    loadGeminiConfig();
+  }, [fetchKeys, loadPrompt, loadGeminiConfig]);
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
@@ -22437,6 +22463,39 @@ var AdminDashboard = () => {
       setIsPromptSaving(false);
     }
   };
+  const handleGeminiConfigSave = async () => {
+    var _a, _b;
+    setError("");
+    setMessage("");
+    try {
+      setIsGeminiConfigSaving(true);
+      const payload = {
+        temperature: geminiConfig.temperature === "" ? null : Number(geminiConfig.temperature),
+        top_p: geminiConfig.top_p === "" ? null : Number(geminiConfig.top_p),
+        media_resolution: geminiConfig.media_resolution || null
+      };
+      const response = await fetch(`${API_BASE}/admin/gemini-config`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (!response.ok) {
+        throw new Error("Kunne ikke lagre Gemini-konfigurasjon");
+      }
+      const data = await response.json();
+      const cfg = data.config || {};
+      setGeminiConfig({
+        temperature: (_a = cfg.temperature) != null ? _a : "",
+        top_p: (_b = cfg.top_p) != null ? _b : "",
+        media_resolution: cfg.media_resolution || ""
+      });
+      setMessage("Gemini-konfigurasjonen er lagret.");
+    } catch (err) {
+      setError(err.message || "Ukjent feil ved lagring av Gemini-konfigurasjon");
+    } finally {
+      setIsGeminiConfigSaving(false);
+    }
+  };
   const maskValue = (key) => {
     if (!key.configured) {
       return "Ikke konfigurert";
@@ -22458,7 +22517,49 @@ var AdminDashboard = () => {
       value: promptValue,
       onChange: (e) => setPromptValue(e.target.value)
     }
-  ), /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex flex-col md:flex-row md:items-center justify-between gap-3" }, /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-xs text-slate-500" }, "Sist oppdatert: ", promptMeta.updated_at ? formatUpdated(promptMeta.updated_at) : "Original fra fil"), /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "secondary", onClick: handlePromptReset, disabled: isPromptSaving || isPromptLoading }, "Tilbakestill"), /* @__PURE__ */ import_react3.default.createElement(Button, { onClick: handlePromptSave, disabled: isPromptSaving || isPromptLoading }, isPromptSaving ? "Lagrer..." : "Lagre prompt"))))), /* @__PURE__ */ import_react3.default.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-3xl p-6 space-y-5" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("h2", { className: "text-xl font-semibold" }, "Legg til eller oppdater n\xF8kkel"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-slate-400 text-sm mt-1" }, "Gi n\xF8kkelen et teknisk navn og en beskrivende etikett.")), /* @__PURE__ */ import_react3.default.createElement("form", { className: "space-y-4", onSubmit: handleSubmit }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-4" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("label", { className: "block text-xs font-semibold text-slate-400 mb-1 tracking-wide" }, "NAVN*"), /* @__PURE__ */ import_react3.default.createElement(
+  ), /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex flex-col md:flex-row md:items-center justify-between gap-3" }, /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-xs text-slate-500" }, "Sist oppdatert: ", promptMeta.updated_at ? formatUpdated(promptMeta.updated_at) : "Original fra fil"), /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-center gap-2" }, /* @__PURE__ */ import_react3.default.createElement(Button, { variant: "secondary", onClick: handlePromptReset, disabled: isPromptSaving || isPromptLoading }, "Tilbakestill"), /* @__PURE__ */ import_react3.default.createElement(Button, { onClick: handlePromptSave, disabled: isPromptSaving || isPromptLoading }, isPromptSaving ? "Lagrer..." : "Lagre prompt"))))), /* @__PURE__ */ import_react3.default.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-3xl p-6 space-y-5" }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-center justify-between" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("h2", { className: "text-xl font-semibold" }, "Gemini-innstillinger"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-slate-400 text-sm mt-1" }, "Juster temperatur, topp\u2011P og oppl\xF8sning for Gemini 3 Pro."))), isGeminiConfigLoading ? /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-sm text-slate-400" }, "Laster Gemini-innstillinger...") : /* @__PURE__ */ import_react3.default.createElement(import_react3.default.Fragment, null, /* @__PURE__ */ import_react3.default.createElement("div", { className: "grid grid-cols-1 md:grid-cols-3 gap-4" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("label", { className: "block text-xs font-semibold text-slate-400 mb-1 tracking-wide" }, "TEMPERATUR"), /* @__PURE__ */ import_react3.default.createElement(
+    "input",
+    {
+      type: "number",
+      step: "0.1",
+      min: "0",
+      max: "2",
+      className: "w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-0",
+      placeholder: "Standard",
+      value: geminiConfig.temperature,
+      onChange: (e) => setGeminiConfig((prev) => ({ ...prev, temperature: e.target.value }))
+    }
+  ), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-[11px] text-slate-500 mt-1" }, "Tomt felt bruker modellens standardverdi.")), /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("label", { className: "block text-xs font-semibold text-slate-400 mb-1 tracking-wide" }, "TOP\u2011P"), /* @__PURE__ */ import_react3.default.createElement(
+    "input",
+    {
+      type: "number",
+      step: "0.05",
+      min: "0",
+      max: "1",
+      className: "w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-0",
+      placeholder: "Standard",
+      value: geminiConfig.top_p,
+      onChange: (e) => setGeminiConfig((prev) => ({ ...prev, top_p: e.target.value }))
+    }
+  )), /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("label", { className: "block text-xs font-semibold text-slate-400 mb-1 tracking-wide" }, "MEDIA-RESOLUSJON"), /* @__PURE__ */ import_react3.default.createElement(
+    "select",
+    {
+      className: "w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-0",
+      value: geminiConfig.media_resolution,
+      onChange: (e) => setGeminiConfig((prev) => ({ ...prev, media_resolution: e.target.value }))
+    },
+    /* @__PURE__ */ import_react3.default.createElement("option", { value: "" }, "Standard"),
+    /* @__PURE__ */ import_react3.default.createElement("option", { value: "low" }, "Lav"),
+    /* @__PURE__ */ import_react3.default.createElement("option", { value: "medium" }, "Medium"),
+    /* @__PURE__ */ import_react3.default.createElement("option", { value: "high" }, "H\xF8y")
+  ), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-[11px] text-slate-500 mt-1" }, "Gjelder analyse av bilder/PDF."))), /* @__PURE__ */ import_react3.default.createElement("div", { className: "flex items-center justify-end" }, /* @__PURE__ */ import_react3.default.createElement(
+    Button,
+    {
+      onClick: handleGeminiConfigSave,
+      disabled: isGeminiConfigSaving || isGeminiConfigLoading
+    },
+    isGeminiConfigSaving ? "Lagrer..." : "Lagre Gemini-innstillinger"
+  )))), /* @__PURE__ */ import_react3.default.createElement("div", { className: "bg-slate-900/80 border border-slate-800 rounded-3xl p-6 space-y-5" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("h2", { className: "text-xl font-semibold" }, "Legg til eller oppdater n\xF8kkel"), /* @__PURE__ */ import_react3.default.createElement("p", { className: "text-slate-400 text-sm mt-1" }, "Gi n\xF8kkelen et teknisk navn og en beskrivende etikett.")), /* @__PURE__ */ import_react3.default.createElement("form", { className: "space-y-4", onSubmit: handleSubmit }, /* @__PURE__ */ import_react3.default.createElement("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-4" }, /* @__PURE__ */ import_react3.default.createElement("div", null, /* @__PURE__ */ import_react3.default.createElement("label", { className: "block text-xs font-semibold text-slate-400 mb-1 tracking-wide" }, "NAVN*"), /* @__PURE__ */ import_react3.default.createElement(
     "input",
     {
       className: "w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm focus:border-indigo-500 focus:ring-0",
