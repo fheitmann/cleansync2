@@ -103,6 +103,11 @@ class GeminiClient:
                 top_p=0.9,
             )
             config_data = base_config.model_dump()
+            config_fields = getattr(
+                types.GenerateContentConfig,
+                "model_fields",
+                getattr(types.GenerateContentConfig, "__fields__", {}),
+            )
             overrides = config_store.get_gemini_config()
             if overrides.get("temperature") is not None:
                 config_data["temperature"] = overrides["temperature"]
@@ -125,7 +130,7 @@ class GeminiClient:
                     config_data["media_resolution"] = media_enum
             if response_mime_type:
                 config_data["response_mime_type"] = response_mime_type
-            if response_json_schema:
+            if response_json_schema and "response_json_schema" in config_fields:
                 config_data["response_json_schema"] = response_json_schema
             config = types.GenerateContentConfig(**config_data)
             response = client.models.generate_content(
@@ -182,7 +187,7 @@ class GeminiClient:
         )
         parts = [
             types.Part.from_bytes(data=file_bytes, mime_type=mime),
-            types.Part.from_text(instruction),
+            types.Part(text=instruction),
         ]
         raw_response = await self._call_model(parts)
         payload = _load_json(raw_response)
@@ -207,8 +212,8 @@ class GeminiClient:
         )
         content = json.dumps({"rooms": rooms_payload}, ensure_ascii=True)
         parts = [
-            types.Part.from_text(content),
-            types.Part.from_text(instruction),
+            types.Part(text=content),
+            types.Part(text=instruction),
         ]
         raw_response = await self._call_model(
             parts,
@@ -226,8 +231,8 @@ class GeminiClient:
             "(entries/total_area_m2/template_name)."
         )
         parts = [
-            types.Part.from_text(raw_text),
-            types.Part.from_text(instruction),
+            types.Part(text=raw_text),
+            types.Part(text=instruction),
         ]
         raw_response = await self._call_model(
             parts,
