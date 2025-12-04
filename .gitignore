@@ -1,0 +1,27 @@
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environments and local configs
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Node.js dependencies and logs
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Operating system clutter
+.DS_Store
+
+# Uploaded/generated data
+uploads/
+storage/uploads/
+storage/docx/
+storage/cleansync.db
+*.db
+*.sqlite3
