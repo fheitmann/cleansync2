@@ -93,53 +93,8 @@ class GeminiClient:
     async def _ensure_cached_instruction(
         self, label: str, instruction_text: str
     ) -> Optional[str]:
-        normalized = instruction_text.strip()
-        if not normalized:
-            return None
-        cache_key = self._cache_key(label, normalized)
-        if cache_key in self._context_cache_ids:
-            return self._context_cache_ids[cache_key]
-
-        cache_parts = [
-            types.Content(
-                role="user",
-                parts=[types.Part(text=normalized)],
-            )
-        ]
-
-        def _create() -> Optional[str]:
-            try:
-                client = self._get_client()
-                try:
-                    response = client.caches.create(
-                        model=self.model_name,
-                        contents=cache_parts,
-                        config={
-                            "display_name": f"cleansync-{label}",
-                            "ttl": "86400s",
-                        },
-                    )
-                except TypeError as exc:
-                    sig = inspect.signature(client.caches.create)
-                    if "contents" in sig.parameters:
-                        raise
-                    response = client.caches.create(
-                        model=self.model_name,
-                        config={
-                            "display_name": f"cleansync-{label}",
-                            "ttl": "86400s",
-                            "contents": cache_parts,
-                        },
-                    )
-                return response.name
-            except Exception as exc:  # pragma: no cover - network failure
-                logger.warning("Failed to create context cache %s: %s", label, exc)
-                return None
-
-        cache_name = await asyncio.to_thread(_create)
-        if cache_name:
-            self._context_cache_ids[cache_key] = cache_name
-        return cache_name
+        # Context caching requires additional Gemini privileges; disabled for now.
+        return None
 
     @staticmethod
     def _media_resolution_value(
