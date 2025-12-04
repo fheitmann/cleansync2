@@ -21,6 +21,10 @@ if [[ ! -d node_modules ]]; then
 fi
 
 echo "Building frontend bundle..."
-npm run build
+if ! npm run build; then
+  echo "Initial build failed. Attempting to rebuild esbuild for this platform..."
+  npm rebuild esbuild
+  npm run build
+fi
 
 echo "Build complete. Assets located in static/"
