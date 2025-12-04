@@ -5,6 +5,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+if [[ -f requirements.txt ]]; then
+  echo "Installing Python dependencies..."
+  "$PYTHON_BIN" -m pip install --upgrade pip
+  "$PYTHON_BIN" -m pip install -r requirements.txt
+fi
+
 if [[ ! -f package.json ]]; then
   echo "No package.json found. Nothing to build."
   exit 0
