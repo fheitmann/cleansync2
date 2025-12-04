@@ -24,6 +24,16 @@ const API_BASE =
   (typeof window !== 'undefined' && window.__CLEAN_SYNC_API_BASE__) ||
   defaultApiBase;
 const ALL_DAYS = ['MAN', 'TIRS', 'ONS', 'TORS', 'FRE', 'LØR', 'SØN'];
+const PLAN_CATEGORIES = [
+  { value: 'auto', label: 'Auto detect' },
+  { value: 'Barnehager', label: 'Barnehager' },
+  { value: 'Normal office', label: 'Normal office' },
+  { value: 'Klinikk', label: 'Klinikk' },
+  { value: 'Car stores', label: 'Car stores' },
+  { value: 'Convenient stores', label: 'Convenient stores' },
+  { value: 'Schools', label: 'Schools' },
+  { value: 'Bar / restaurants', label: 'Bar / restaurants' }
+];
 const PLAN_STATUS_POLL_MS = 10000;
 const MIN_WAIT_MS = 60 * 1000;
 const getLoadingMessage = () =>
@@ -266,7 +276,8 @@ const GeneratorView = () => {
     hasArea: true,
     referenceLabel: '',
     referenceWidth: '',
-    referenceUnit: 'm'
+    referenceUnit: 'm',
+    planCategory: 'auto'
   });
   const [processingProgress, setProcessingProgress] = useState(0);
   const [processingStartTime, setProcessingStartTime] = useState(null);
@@ -533,7 +544,8 @@ const GeneratorView = () => {
         has_area: options.hasArea,
         reference_label: options.referenceLabel || null,
         reference_width: options.referenceWidth ? Number(options.referenceWidth) : null,
-        reference_unit: options.referenceUnit
+        reference_unit: options.referenceUnit,
+        plan_category: options.planCategory === 'auto' ? null : options.planCategory
       }
     };
 
@@ -756,6 +768,27 @@ const GeneratorView = () => {
               <div>
                 <h4 className="font-medium text-gray-900">Romnavn finnes på tegningen</h4>
                 <p className="text-sm text-gray-500">Systemet bruker rometiketter direkte.</p>
+              </div>
+            </div>
+
+            <div className="p-4 border border-gray-200 rounded-lg bg-gradient-to-r from-indigo-50 to-white">
+              <h4 className="font-medium text-gray-900">Velg kategori for renholdsplan</h4>
+              <p className="text-sm text-gray-500 mt-1">
+                Systemet forsøker å autodetektere type areal. Velg en kategori dersom du vil overstyre valget før generering.
+              </p>
+              <div className="mt-3">
+                <label className="text-xs font-semibold text-gray-600 mb-1 block">Kategori</label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  value={options.planCategory}
+                  onChange={(e) => setOptions((prev) => ({ ...prev, planCategory: e.target.value }))}
+                >
+                  {PLAN_CATEGORIES.map((category) => (
+                    <option key={category.value} value={category.value}>
+                      {category.label}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
