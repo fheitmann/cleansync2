@@ -15,6 +15,10 @@ node_modules/
 npm-debug.log*
 yarn-error.log*
 
+# Frontend build artifacts
+static/app.js
+static/app.js.map
+
 # Operating system clutter
 .DS_Store
 
