@@ -1,0 +1,10 @@
+[
+  { "id": "kindergarten", "no": "Barnehage", "en": "Kindergarten" },
+  { "id": "office", "no": "Kontor", "en": "Office" },
+  { "id": "clinic", "no": "Klinikk", "en": "Clinic" },
+  { "id": "car_store", "no": "Bilbutikk", "en": "Car store" },
+  { "id": "convenience_store", "no": "Nærbutikk", "en": "Convenience store" },
+  { "id": "school", "no": "Skole", "en": "School" },
+  { "id": "bar_restaurant", "no": "Bar / restaurant", "en": "Bar / restaurant" },
+  { "id": "retail_warehouse", "no": "Butikk / lager", "en": "Retail / warehouse" }
+]

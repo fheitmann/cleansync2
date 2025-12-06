@@ -4,7 +4,9 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.domain.plan_categories import PLAN_CATEGORY_IDS
 
 ALL_DAYS = ["MAN", "TIRS", "ONS", "TORS", "FRE", "LØR", "SØN"]
 
@@ -46,6 +48,19 @@ class FloorPlanOptions(BaseModel):
     reference_label: Optional[str] = None
     reference_width: Optional[float] = None
     reference_unit: str = "m"
+    plan_category: Optional[str] = Field(
+        default=None,
+        description="Plan category id from plan_categories.json",
+    )
+
+    @field_validator("plan_category")
+    @classmethod
+    def _validate_plan_category(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if value not in PLAN_CATEGORY_IDS:
+            raise ValueError("Unknown plan_category")
+        return value
 
 
 class TemplateMetadata(BaseModel):
@@ -62,6 +77,16 @@ class GeneratePlanRequest(BaseModel):
 class GeneratePlanResponse(BaseModel):
     plan: CleaningPlan
     docx_url: str
+
+
+class PlanCategoryDetectionResponse(BaseModel):
+    category_id: str
+    category_no: str
+    category_en: str
+
+
+class PlanCategoryDetectRequest(BaseModel):
+    file_id: str
 
 
 class PlanJobStatus(str, Enum):

@@ -15,6 +15,7 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
 
+from app.domain.plan_categories import PLAN_CATEGORY_LIST, get_plan_category
 from app.models.schemas import CleaningPlan, FloorPlanExtraction, FloorPlanOptions, Room
 from app.services import config_store
 
@@ -316,8 +317,67 @@ class GeminiClient:
     async def analyze_template(self, template_path: Path) -> str:
         return template_path.stem.replace("_", " ")
 
+    async def detect_plan_category(self, file_path: Path) -> str:
+        file_bytes = file_path.read_bytes()
+        mime_type, _ = mimetypes.guess_type(file_path.name)
+        mime = mime_type or "application/octet-stream"
+        categories_lines = "\n".join(
+            f"- {entry['id']}: {entry['en']} (norsk: {entry['no']})"
+            for entry in PLAN_CATEGORY_LIST
+        )
+        base_prompt = self._get_prompt_text()
+        instruction = (
+            f"{base_prompt}\n"
+            "Du får en plantegning som bilde eller PDF. "
+            "Velg nøyaktig én kategori som best beskriver bygget basert på listen under. "
+            "Svar som JSON med formatet {\"category_id\": \"office\"}.\n"
+            "Tillatte kategorier:\n"
+            f"{categories_lines}"
+        )
+        cached_instruction = await self._ensure_cached_instruction(
+            "plan-category-detection", instruction
+        )
+        parts: List[types.Part] = []
+        if cached_instruction is None:
+            parts.append(types.Part(text=instruction))
+        inline_kwargs: Dict[str, Any] = {}
+        if mime.startswith("image/"):
+            inline_kwargs["media_resolution"] = types.PartMediaResolution(
+                level=self._media_resolution_value("high")
+            )
+        elif mime == "application/pdf":
+            inline_kwargs["media_resolution"] = types.PartMediaResolution(
+                level=self._media_resolution_value("medium")
+            )
+        parts.append(
+            types.Part(
+                inline_data=types.Blob(
+                    mime_type=mime,
+                    data=file_bytes,
+                ),
+                **inline_kwargs,
+            )
+        )
+        content = types.Content(role="user", parts=parts)
+        raw_response = await self._call_model(
+            [content],
+            response_mime_type="application/json",
+            cached_content=cached_instruction,
+        )
+        try:
+            payload = json.loads(raw_response)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("category detection returned invalid JSON") from exc
+        category_id = payload.get("category_id")
+        if not isinstance(category_id, str):
+            raise RuntimeError("category detection did not return category_id")
+        return category_id
+
     async def _build_plan_request_parts(
-        self, plan_payload: str, template_label: str
+        self,
+        plan_payload: str,
+        template_label: str,
+        plan_category_id: Optional[str] = None,
     ) -> tuple[List[types.Part], Optional[str]]:
         base_prompt = self._get_prompt_text()
         base_instruction = (
@@ -333,22 +393,35 @@ class GeminiClient:
         parts: List[types.Part] = []
         if cached_instruction is None:
             parts.append(types.Part(text=base_instruction))
+        category_instruction = None
+        if plan_category_id:
+            category_entry = get_plan_category(plan_category_id)
+            if category_entry:
+                category_instruction = (
+                    f"Plan category: {category_entry['en']} (norsk kategori: {category_entry['no']}). "
+                    "Generate a cleaning plan based on the category."
+                )
         parts.extend(
             [
                 types.Part(text=plan_payload),
                 types.Part(text=f"Bruk mal: {template_label}."),
             ]
         )
+        if category_instruction:
+            parts.append(types.Part(text=category_instruction))
         return parts, cached_instruction
 
     async def generate_plan(
-        self, rooms: List[Room], template_name: Optional[str] = None
+        self,
+        rooms: List[Room],
+        template_name: Optional[str] = None,
+        plan_category_id: Optional[str] = None,
     ) -> CleaningPlan:
         rooms_payload = [room.model_dump() for room in rooms]
         template_label = template_name or "Cleansync Standard"
         plan_payload = json.dumps({"rooms": rooms_payload}, ensure_ascii=True)
         parts, cached_instruction = await self._build_plan_request_parts(
-            plan_payload, template_label
+            plan_payload, template_label, plan_category_id=plan_category_id
         )
         content = types.Content(role="user", parts=parts)
         raw_response = await self._call_model(
@@ -360,7 +433,10 @@ class GeminiClient:
         return CleaningPlan.model_validate_json(raw_response)
 
     async def generate_plan_batch(
-        self, room_batches: List[List[Room]], template_name: Optional[str] = None
+        self,
+        room_batches: List[List[Room]],
+        template_name: Optional[str] = None,
+        plan_category_id: Optional[str] = None,
     ) -> List[CleaningPlan]:
         if not room_batches:
             return []
@@ -371,7 +447,7 @@ class GeminiClient:
                 {"rooms": [room.model_dump() for room in rooms]}, ensure_ascii=True
             )
             parts, cached_instruction = await self._build_plan_request_parts(
-                plan_payload, template_label
+                plan_payload, template_label, plan_category_id=plan_category_id
             )
             content = types.Content(role="user", parts=parts)
             config = self._build_generation_config(

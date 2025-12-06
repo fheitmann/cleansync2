@@ -88,7 +88,11 @@ class PlanJobRunner:
                 template_path = get_file_path(template_id)
                 template_name = await self._client.analyze_template(template_path)
 
-            plan = await self._client.generate_plan(rooms, template_name=template_name)
+            plan = await self._client.generate_plan(
+                rooms,
+                template_name=template_name,
+                plan_category_id=options.plan_category,
+            )
             docx_bytes = plan_to_docx_bytes(plan)
             docx_id = save_bytes(docx_bytes, suffix=".docx", category="docx")
             docx_url = f"/download/{docx_id}"
@@ -97,6 +101,7 @@ class PlanJobRunner:
             metadata = {
                 "template_id": template_id,
                 "file_count": len(file_ids),
+                "plan_category": options.plan_category,
             }
             plan_store.save_plan(
                 source="generator",

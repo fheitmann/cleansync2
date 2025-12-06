@@ -16,6 +16,7 @@ import {
   BoxSelect,
   Maximize2
 } from 'lucide-react';
+import planCategories from './plan_categories.json';
 
 const defaultApiBase =
   (typeof window !== 'undefined' && `${window.location.origin}/api`) ||
@@ -24,17 +25,12 @@ const API_BASE =
   (typeof window !== 'undefined' && window.__CLEAN_SYNC_API_BASE__) ||
   defaultApiBase;
 const ALL_DAYS = ['MAN', 'TIRS', 'ONS', 'TORS', 'FRE', 'LØR', 'SØN'];
-const PLAN_CATEGORIES = [
-  { value: 'auto', label: 'Auto (oppdag automatisk)' },
-  { value: 'kindergarten', label: 'Barnehage' },
-  { value: 'office', label: 'Kontor' },
-  { value: 'clinic', label: 'Klinikk' },
-  { value: 'car_store', label: 'Bilbutikk' },
-  { value: 'convenience_store', label: 'Nærbutikk' },
-  { value: 'school', label: 'Skole' },
-  { value: 'bar_restaurant', label: 'Bar / restaurant' },
-  { value: 'retail_warehouse', label: 'Butikk / lager' }
-];
+const PLAN_CATEGORIES = planCategories.map((category) => ({
+  value: category.id,
+  label: category.no
+}));
+const DETECTING_CATEGORY_VALUE = '__detecting__';
+const DEFAULT_PLAN_CATEGORY = PLAN_CATEGORIES[0]?.value || '';
 const PLAN_STATUS_POLL_MS = 10000;
 const MIN_WAIT_MS = 60 * 1000;
 const getLoadingMessage = () =>
@@ -278,7 +274,7 @@ const GeneratorView = () => {
     referenceLabel: '',
     referenceWidth: '',
     referenceUnit: 'm',
-    planCategory: 'auto'
+    planCategory: DEFAULT_PLAN_CATEGORY
   });
   const [processingProgress, setProcessingProgress] = useState(0);
   const [processingStartTime, setProcessingStartTime] = useState(null);
@@ -295,7 +291,16 @@ const GeneratorView = () => {
   const [historySelection, setHistorySelection] = useState(null);
   const [isFetchingHistoryPlan, setIsFetchingHistoryPlan] = useState(null);
   const [activeJob, setActiveJob] = useState(null);
+  const [detectedCategory, setDetectedCategory] = useState(null);
+  const [isDetectingCategory, setIsDetectingCategory] = useState(false);
+  const [categoryDetectionError, setCategoryDetectionError] = useState('');
+  const [hasManualCategory, setHasManualCategory] = useState(false);
   const planStatusTimerRef = useRef(null);
+  const hasManualCategoryRef = useRef(false);
+
+  useEffect(() => {
+    hasManualCategoryRef.current = hasManualCategory;
+  }, [hasManualCategory]);
 
   const formatHistoryTimestamp = (value) => {
     if (!value) return '';
@@ -351,6 +356,46 @@ const GeneratorView = () => {
   useEffect(() => {
     return () => stopPlanPolling();
   }, [stopPlanPolling]);
+
+  const detectPlanCategory = useCallback(
+    async (fileId) => {
+      if (!fileId) return;
+      setIsDetectingCategory(true);
+      setCategoryDetectionError('');
+      setDetectedCategory(null);
+      setOptions((prev) => ({ ...prev, planCategory: DETECTING_CATEGORY_VALUE }));
+      try {
+        const response = await fetch(`${API_BASE}/detect-plan-category`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file_id: fileId })
+        });
+        const data = await parseApiResponse(response, 'Kunne ikke foreslå kategori');
+        setDetectedCategory(data);
+        if (!hasManualCategoryRef.current) {
+          setOptions((prev) => ({ ...prev, planCategory: data.category_id }));
+        }
+      } catch (err) {
+        setCategoryDetectionError(err.message);
+      } finally {
+        setIsDetectingCategory(false);
+      }
+    },
+    [setOptions]
+  );
+
+  useEffect(() => {
+    if (!fileIds.length) {
+      setDetectedCategory(null);
+      setCategoryDetectionError('');
+      setIsDetectingCategory(false);
+      setHasManualCategory(false);
+      setOptions((prev) => ({ ...prev, planCategory: DEFAULT_PLAN_CATEGORY }));
+      return;
+    }
+    setHasManualCategory(false);
+    detectPlanCategory(fileIds[0]);
+  }, [fileIds, detectPlanCategory]);
 
   const pollJobStatus = useCallback(
     (jobId) => {
@@ -546,7 +591,10 @@ const GeneratorView = () => {
         reference_label: options.referenceLabel || null,
         reference_width: options.referenceWidth ? Number(options.referenceWidth) : null,
         reference_unit: options.referenceUnit,
-        plan_category: options.planCategory === 'auto' ? null : options.planCategory
+        plan_category:
+          !options.planCategory || options.planCategory === DETECTING_CATEGORY_VALUE
+            ? null
+            : options.planCategory
       }
     };
 
@@ -567,6 +615,12 @@ const GeneratorView = () => {
       setStatusMessage('');
       setStep(2);
     }
+  };
+
+  const handlePlanCategoryChange = (value) => {
+    const isManualSelection = detectedCategory ? value !== detectedCategory.category_id : true;
+    setHasManualCategory(isManualSelection);
+    setOptions((prev) => ({ ...prev, planCategory: value }));
   };
 
   const updateRow = (rowId, field, value) => {
@@ -782,14 +836,36 @@ const GeneratorView = () => {
                 <select
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                   value={options.planCategory}
-                  onChange={(e) => setOptions((prev) => ({ ...prev, planCategory: e.target.value }))}
+                  onChange={(e) => handlePlanCategoryChange(e.target.value)}
+                  disabled={isDetectingCategory || !PLAN_CATEGORIES.length}
                 >
+                  {isDetectingCategory && (
+                    <option value={DETECTING_CATEGORY_VALUE} disabled>
+                      Bestemmer kategori …
+                    </option>
+                  )}
+                  {!isDetectingCategory && options.planCategory === DETECTING_CATEGORY_VALUE && (
+                    <option value={DETECTING_CATEGORY_VALUE} disabled>
+                      Velg kategori
+                    </option>
+                  )}
                   {PLAN_CATEGORIES.map((category) => (
                     <option key={category.value} value={category.value}>
                       {category.label}
                     </option>
                   ))}
                 </select>
+                <div className="mt-2 min-h-[1.25rem] text-xs text-gray-500">
+                  {isDetectingCategory && <span>Bestemmer kategori …</span>}
+                  {!isDetectingCategory && detectedCategory && (
+                    <span>
+                      Automatisk forslag: {detectedCategory.category_no} ({detectedCategory.category_en})
+                    </span>
+                  )}
+                  {categoryDetectionError && (
+                    <span className="text-red-500">Kunne ikke foreslå kategori: {categoryDetectionError}</span>
+                  )}
+                </div>
               </div>
             </div>
 

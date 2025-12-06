@@ -8,6 +8,7 @@ from typing import List
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
+from app.domain.plan_categories import PLAN_CATEGORY_LIST, get_plan_category
 from app.models.schemas import (
     APIKeyDeleteResponse,
     APIKeyListResponse,
@@ -25,6 +26,8 @@ from app.models.schemas import (
     GeneratePlanRequest,
     GeneratePlanJobResponse,
     GeneratePlanStatusResponse,
+    PlanCategoryDetectRequest,
+    PlanCategoryDetectionResponse,
     Room,
     SystemPromptResponse,
     SystemPromptUpdateRequest,
@@ -77,6 +80,31 @@ async def upload_template(file: UploadFile = File(...)) -> TemplateMetadata:
 async def upload_external_plan(files: List[UploadFile] = File(...)) -> UploadResponse:
     file_ids = [save_upload_file(upload, category="external") for upload in files]
     return UploadResponse(file_ids=file_ids)
+
+
+@router.post(
+    "/detect-plan-category", response_model=PlanCategoryDetectionResponse
+)
+async def detect_plan_category_route(
+    request: PlanCategoryDetectRequest,
+) -> PlanCategoryDetectionResponse:
+    try:
+        file_path = get_file_path(request.file_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="File not found") from exc
+    try:
+        category_id = await gemini_client.detect_plan_category(file_path)
+    except GeminiServiceError as exc:
+        _handle_gemini_error(exc)
+    entry = get_plan_category(category_id)
+    if not entry:
+        # default to first configured category to avoid crashing the UI
+        entry = PLAN_CATEGORY_LIST[0]
+    return PlanCategoryDetectionResponse(
+        category_id=entry["id"],
+        category_no=entry["no"],
+        category_en=entry["en"],
+    )
 
 
 async def _process_single_file(file_id: str, options: FloorPlanOptions) -> List[Room]:
@@ -158,13 +186,17 @@ async def run_batch(request: BatchRunRequest) -> BatchStatusResponse:
 
     async def processor(file_id: str, options):
         rooms = await _process_single_file(file_id, options)
-        return await gemini_client.generate_plan(rooms)
+        return await gemini_client.generate_plan(
+            rooms, plan_category_id=options.plan_category
+        )
 
     async def batch_processor(file_ids: List[str], options: FloorPlanOptions):
         room_batches = []
         for file_id in file_ids:
             room_batches.append(await _process_single_file(file_id, options))
-        return await gemini_client.generate_plan_batch(room_batches)
+        return await gemini_client.generate_plan_batch(
+            room_batches, plan_category_id=options.plan_category
+        )
 
     job = await batch_runner.start_job(
         request.file_ids,
