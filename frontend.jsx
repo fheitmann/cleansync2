@@ -25,14 +25,15 @@ const API_BASE =
   defaultApiBase;
 const ALL_DAYS = ['MAN', 'TIRS', 'ONS', 'TORS', 'FRE', 'LØR', 'SØN'];
 const PLAN_CATEGORIES = [
-  { value: 'auto', label: 'Auto detect' },
-  { value: 'Barnehager', label: 'Barnehager' },
-  { value: 'Normal office', label: 'Normal office' },
-  { value: 'Klinikk', label: 'Klinikk' },
-  { value: 'Car stores', label: 'Car stores' },
-  { value: 'Convenient stores', label: 'Convenient stores' },
-  { value: 'Schools', label: 'Schools' },
-  { value: 'Bar / restaurants', label: 'Bar / restaurants' }
+  { value: 'auto', label: 'Auto (oppdag automatisk)' },
+  { value: 'kindergarten', label: 'Barnehage' },
+  { value: 'office', label: 'Kontor' },
+  { value: 'clinic', label: 'Klinikk' },
+  { value: 'car_store', label: 'Bilbutikk' },
+  { value: 'convenience_store', label: 'Nærbutikk' },
+  { value: 'school', label: 'Skole' },
+  { value: 'bar_restaurant', label: 'Bar / restaurant' },
+  { value: 'retail_warehouse', label: 'Butikk / lager' }
 ];
 const PLAN_STATUS_POLL_MS = 10000;
 const MIN_WAIT_MS = 60 * 1000;
